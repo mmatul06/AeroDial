@@ -1,13 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Release publish settings ─────────────────────────────────────────────
-       PublishSingleFile is intentionally omitted: WinUI 3 native DLLs
-       (Microsoft.UI.Xaml.dll, SkiaSharp native) cannot be bundled into the
-       managed exe. The output is always a folder; zip it for distribution.
-       TrimMode=partial is safe; full trim breaks WinUI 3 XAML reflection.   -->
+  <!-- Release settings ───────────────────────────────────────────────────
+       Trimming is intentionally DISABLED. AeroDial relies on reflection-based
+       System.Text.Json (config, themes, menus) and built-in COM (AudioService's
+       WASAPI volume access) — trimming turns on feature switches that disable
+       both (JsonSerializerIsReflectionEnabledByDefault=false, BuiltInComInterop
+       IsSupported=false), which breaks config load/save and audio at runtime.
+
+       Single-file: `dotnet publish -c Release -r win-x64` produces ONE self-
+       contained AeroDial.exe. The WinUI 3 / SkiaSharp native DLLs are bundled
+       and self-extracted at runtime (IncludeNativeLibrariesForSelfExtract).
+       EnableMsixTooling=true (main group) is required by the Windows App SDK to
+       embed resources.pri in single-file mode. The 11 built-in themes live in
+       code (BuiltInThemes.cs), so no external themes/ folder is needed.       -->
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
-    <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>partial</TrimMode>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <PublishReadyToRun>true</PublishReadyToRun>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
@@ -25,7 +34,9 @@
 
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
-    <EnableMsixTooling>false</EnableMsixTooling>
+    <!-- Required by the Windows App SDK for single-file publish (resources.pri embed).
+         App stays unpackaged (WindowsPackageType=None). -->
+    <EnableMsixTooling>true</EnableMsixTooling>
     <DisableMsvcVersionCheck>true</DisableMsvcVersionCheck>
     <!-- Self-contained: bundles WinUI native DLLs, no runtime registration needed -->
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -36,10 +47,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>AeroDial</AssemblyName>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <Company>3M Design Solutions</Company>
     <Authors>Muhtasim Mahbub</Authors>
-    <Copyright>Copyright © 2025 Muhtasim Mahbub | 3M Design Solutions</Copyright>
+    <Copyright>Copyright © 2026 Muhtasim Mahbub | 3M Design Solutions</Copyright>
     <Description>AeroDial — A radial launcher overlay for Windows</Description>
     <Optimize Condition="'$(Configuration)'=='Release'">true</Optimize>
     <!-- Strip satellite assemblies for all languages except English.

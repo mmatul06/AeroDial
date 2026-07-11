@@ -70,7 +70,6 @@ public sealed class AppearanceConfig
     public int    SliceCount       { get; set; } = 6;
     public bool   AnimationsEnabled { get; set; } = true;
     public bool   RespectSystemAnimationSetting { get; set; } = true;
-    public bool   ShowLabels       { get; set; } = true;
     public bool   ShowBreadcrumb   { get; set; } = false; // feature removed; kept for JSON compat
     public float  BackgroundDimOpacity { get; set; } = 0f; // feature removed; kept for JSON compat
     public float  RingOpacity          { get; set; } = 0.92f;
@@ -80,6 +79,12 @@ public sealed class AppearanceConfig
     // ── Volume ring ──────────────────────────────────────────────────────
     /// <summary>Controls when the volume ring arc is visible.</summary>
     public VolumeRingVisibility VolumeRingVisibility { get; set; } = VolumeRingVisibility.Hidden;
+
+    // ── Media info ───────────────────────────────────────────────────────
+    /// <summary>Show the now-playing media title below the ring.</summary>
+    public bool ShowNowPlaying { get; set; } = true;
+    /// <summary>Show a small decorative audio visualizer below the ring while media plays.</summary>
+    public bool ShowVisualizer { get; set; } = true;
 
     // ── Advanced ─────────────────────────────────────────────────────────
     /// <summary>When true, the L2 ring thins when an L3 ring is also visible.</summary>
@@ -129,6 +134,9 @@ public sealed class MenuItemConfig
     public string?          SubMenuId       { get; set; }
     public MediaActionType? MediaAction     { get; set; }
 
+    // Macro — an ordered sequence of keystroke/text/delay steps (ActionType.Macro)
+    public List<MacroStep>? Macro           { get; set; }
+
     // Scroll-wheel secondary actions — fires when dial is open and user scrolls on this slice
     public MediaActionType? ScrollUpAction   { get; set; }
     public MediaActionType? ScrollDownAction { get; set; }
@@ -138,6 +146,23 @@ public sealed class MenuItemConfig
 
     [JsonIgnore]
     public bool IsSubMenu => ActionType == ActionType.SubMenu;
+
+    /// <summary>An empty placeholder slice: it holds a position on the ring (so items
+    /// keep their slot when a neighbour is removed) but renders dimmed and does nothing.</summary>
+    [JsonIgnore]
+    public bool IsEmptySlot => ActionType == ActionType.None && string.IsNullOrWhiteSpace(Label);
+}
+
+// ── Macros ──────────────────────────────────────────────────────────────────────
+
+public sealed class MacroStep
+{
+    public MacroStepType Type    { get; set; } = MacroStepType.TypeText;
+    /// <summary>Payload: literal text (TypeText), chord like "Ctrl+S" (KeyPress),
+    /// or a single key token like "Shift"/"Enter"/"A" (KeyDown/KeyUp). Unused for Delay.</summary>
+    public string        Value   { get; set; } = string.Empty;
+    /// <summary>Milliseconds to wait (Delay steps only).</summary>
+    public int           DelayMs { get; set; }
 }
 
 // ── App profiles ──────────────────────────────────────────────────────────────
@@ -162,6 +187,16 @@ public enum ActionType
     SubMenu,
     OpenSettings,
     FocusWindow,  // bring an existing window to the foreground (HWND is in-memory only)
+    Macro,        // run an ordered sequence of keystroke/text/delay steps
+}
+
+public enum MacroStepType
+{
+    TypeText,  // type a literal string (sent as Unicode, layout-independent)
+    KeyPress,  // press+release a chord, e.g. "Ctrl+S"
+    KeyDown,   // press a single key and hold it (paired with a later KeyUp)
+    KeyUp,     // release a single key
+    Delay,     // wait DelayMs milliseconds
 }
 
 public enum MediaActionType

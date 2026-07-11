@@ -106,6 +106,94 @@ internal sealed class OverlayRenderer : IDisposable
     private SKTypeface? _cachedTypeface;
     private string?     _cachedFontFamily;
 
+    // ── Pooled draw objects ───────────────────────────────────────────────
+    // The render loop runs at ~100+ fps; allocating SKPaint/SKPath/SKShader/
+    // SKMaskFilter/SKColorFilter every frame produced GC hitches. These reusable
+    // objects and small caches eliminate the per-frame native allocations.
+    // Everything here is touched only on the single render thread, so no locks
+    // are needed — but each cache MUST dispose the native object it replaces
+    // (same discipline as _cachedTypeface) and Dispose() disposes them all.
+    private readonly SKPath  _path        = new();
+    private readonly SKPath  _arcPath     = new();
+    private readonly SKPaint _glowFill    = new() { IsAntialias = true };
+    private readonly SKPaint _arcStroke   = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
+    private readonly SKPaint _iconPaint   = new() { IsAntialias = true, FilterQuality = SKFilterQuality.High };
+    private readonly SKPaint _shimmerPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
+
+    private readonly Dictionary<int, SKMaskFilter>                 _blurCache       = new();
+    private readonly Dictionary<(int, uint, uint, int), SKShader>  _gradientCache   = new();
+    private readonly Dictionary<uint, SKColorFilter>               _iconFilterCache = new();
+    private SKPathEffect? _shimmerDash;
+    private float         _shimmerDashScale = -1f;
+    private float         _gradCacheCx = float.NaN, _gradCacheCy = float.NaN;
+
+    private static uint Pack(SKColor c) =>
+        ((uint)c.Alpha << 24) | ((uint)c.Red << 16) | ((uint)c.Green << 8) | c.Blue;
+
+    // Blur mask filter cached by sigma (quantized to 0.1) so the same blur radius
+    // is built once. Covers slice glow, accent-arc glow, and volume-tip glow.
+    private SKMaskFilter GetBlur(float sigma)
+    {
+        int key = Math.Max(1, (int)MathF.Round(sigma * 10f));
+        if (!_blurCache.TryGetValue(key, out var mf))
+        {
+            if (_blurCache.Count > 128) { foreach (var m in _blurCache.Values) m.Dispose(); _blurCache.Clear(); }
+            mf = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, key / 10f);
+            _blurCache[key] = mf;
+        }
+        return mf;
+    }
+
+    // Radial-gradient shader cached by (radius, both colors, gradient split).
+    // In the steady Open state radius+colors are stable, so this hits every frame
+    // across all rings. The center (cx,cy) is baked into the shader, so the cache
+    // is cleared if the center moves (window resize / monitor change).
+    private SKShader GetGradient(float cx, float cy, float outerR, SKColor c0, SKColor c1, float gradPos)
+    {
+        if (_gradCacheCx != cx || _gradCacheCy != cy) { ClearGradientCache(); _gradCacheCx = cx; _gradCacheCy = cy; }
+        var key = ((int)MathF.Round(outerR), Pack(c0), Pack(c1), (int)MathF.Round(gradPos * 1000f));
+        if (!_gradientCache.TryGetValue(key, out var sh))
+        {
+            if (_gradientCache.Count > 64) ClearGradientCache();
+            sh = SKShader.CreateRadialGradient(
+                new SKPoint(cx, cy), outerR,
+                [c0, c1], [gradPos, 1.0f], SKShaderTileMode.Clamp);
+            _gradientCache[key] = sh;
+        }
+        return sh;
+    }
+
+    private void ClearGradientCache()
+    {
+        foreach (var s in _gradientCache.Values) s.Dispose();
+        _gradientCache.Clear();
+    }
+
+    // Icon tint (Modulate blend) cached by packed color. Steady state is one entry.
+    private SKColorFilter GetIconFilter(SKColor tint)
+    {
+        uint key = Pack(tint);
+        if (!_iconFilterCache.TryGetValue(key, out var cf))
+        {
+            if (_iconFilterCache.Count > 64) { foreach (var f in _iconFilterCache.Values) f.Dispose(); _iconFilterCache.Clear(); }
+            cf = SKColorFilter.CreateBlendMode(tint, SKBlendMode.Modulate);
+            _iconFilterCache[key] = cf;
+        }
+        return cf;
+    }
+
+    // Shimmer dash effect — rebuilt only when scale changes.
+    private SKPathEffect GetShimmerDash(float scale)
+    {
+        if (_shimmerDash is null || _shimmerDashScale != scale)
+        {
+            _shimmerDash?.Dispose();
+            _shimmerDash      = SKPathEffect.CreateDash([4f * scale, 12f * scale], 0f);
+            _shimmerDashScale = scale;
+        }
+        return _shimmerDash;
+    }
+
     public OverlayRenderer() { }
 
     public void SetHwnd(nint hwnd) => _hwnd = hwnd;
@@ -689,8 +777,14 @@ internal sealed class OverlayRenderer : IDisposable
             float sweep      = fullArc - gap;
             float startOff   = -90f - fullArc / 2f;
 
+            // When the hovered parent has an open child ring, its outward glow would bleed
+            // across the small gap into the child-ring band and tint it — by an amount that
+            // varies with the parent's angle. Suppress that parent's outward glow so the
+            // child ring looks identical regardless of which parent opened it.
+            bool parentHasChild = childMenu != null && hovered == childParentIdx;
+
             // Glow pass (drawn before slices so glow sits behind everything)
-            if (hovered >= 0 && hovered < sliceCount)
+            if (hovered >= 0 && hovered < sliceCount && !parentHasChild)
             {
                 float glowStart = startOff + hovered * fullArc + gap / 2f;
                 DrawSliceGlow(canvas, cx, cy, outerR, sliceInnerR, glowStart, sweep, theme, rAlpha, scale);
@@ -700,9 +794,10 @@ internal sealed class OverlayRenderer : IDisposable
             for (int i = 0; i < sliceCount; i++)
             {
                 bool  hov   = i == hovered;
-                bool  empty = i >= itemCount;
+                bool  empty = i >= itemCount || menu.Items[i].IsEmptySlot;
                 float start = startOff + i * fullArc + gap / 2f;
-                DrawSlice(canvas, cx, cy, outerR, sliceInnerR, start, sweep, theme, hov, rAlpha, scale, empty);
+                bool  outerGlow = !(hov && parentHasChild); // also suppress the outer accent-arc glow
+                DrawSlice(canvas, cx, cy, outerR, sliceInnerR, start, sweep, theme, hov, rAlpha, scale, empty, outerGlow);
             }
 
             // Inner accent arc on the hovered slice (inner edge of slice, not center circle)
@@ -711,18 +806,17 @@ internal sealed class OverlayRenderer : IDisposable
                 float arcStart = startOff + hovered * fullArc + gap / 2f + 2f;
                 float arcSweep = sweep - 4f;
                 var   accent   = theme.ToSKColor(theme.AccentColor);
-                using var arcPaint = new SKPaint
-                {
-                    IsAntialias = true, Style = SKPaintStyle.Stroke,
-                    StrokeWidth = 2.5f * scale,
-                    Color       = accent.WithAlpha((byte)(200 * rAlpha)),
-                };
-                arcPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 2f * scale);
-                using var arcPath = new SKPath();
-                arcPath.ArcTo(
+                _arcStroke.Style       = SKPaintStyle.Stroke;
+                _arcStroke.StrokeCap   = SKStrokeCap.Butt;
+                _arcStroke.StrokeWidth = 2.5f * scale;
+                _arcStroke.Color       = accent.WithAlpha((byte)(200 * rAlpha));
+                _arcStroke.MaskFilter  = GetBlur(2f * scale);
+                _arcPath.Rewind();
+                _arcPath.ArcTo(
                     new SKRect(cx - sliceInnerR - 1f, cy - sliceInnerR - 1f, cx + sliceInnerR + 1f, cy + sliceInnerR + 1f),
                     arcStart, arcSweep, true);
-                canvas.DrawPath(arcPath, arcPaint);
+                canvas.DrawPath(_arcPath, _arcStroke);
+                _arcStroke.MaskFilter = null;
             }
 
             // Shimmer — rotating dashed arc on outer ring edge
@@ -744,13 +838,13 @@ internal sealed class OverlayRenderer : IDisposable
             // Volume level arc — persistent thin arc just outside the ring showing current volume %
             DrawVolumeArc(canvas, cx, cy, AppConstants.RingOuterRadius * eased * scale, theme, rAlpha, scale);
 
-            // Icons and labels
-            if (appearance.ShowLabels)
+            // Icons
             {
                 int labelCount = Math.Min(sliceCount, itemCount);
                 for (int i = 0; i < labelCount; i++)
                 {
                     var   item = menu.Items[i];
+                    if (item.IsEmptySlot) continue;
                     bool  hov  = i == hovered;
                     float mid  = startOff + i * fullArc + fullArc / 2f;
                     float rad  = mid.ToRadians();
@@ -837,6 +931,22 @@ internal sealed class OverlayRenderer : IDisposable
             bool showBackArrow = hasParent || childMenu != null;
             DrawCenter(canvas, cx, cy, innerR, theme, rAlpha, scale, centerLabel, labelAlpha, showBackArrow);
 
+            // Now-playing title + decorative visualizer, drawn below the ring
+            var media = App.MediaInfo;
+            if (media is not null)
+            {
+                float baseR = AppConstants.RingOuterRadius * scale;
+                // Only show the title while media is actually playing (hide when paused/stopped).
+                if (appearance.ShowNowPlaying && media.IsPlaying)
+                {
+                    string np = media.NowPlaying;
+                    if (np.Length > 0)
+                        DrawNowPlaying(canvas, cx, cy + baseR + 24f * scale, np, theme, rAlpha, scale);
+                }
+                if (appearance.ShowVisualizer && media.IsPlaying)
+                    DrawVisualizer(canvas, cx, cy + baseR + 50f * scale, theme, rAlpha, scale, _volumeDisplayLevel);
+            }
+
             canvas.Restore();
             FlushToWindow();
         }
@@ -854,17 +964,17 @@ internal sealed class OverlayRenderer : IDisposable
 
     // ── Drawing helpers ───────────────────────────────────────────────────
 
-    private static SKPath BuildSlicePath(float cx, float cy,
+    // Fills the given scratch path with a slice arc segment (no allocation).
+    private static void BuildSlicePath(SKPath path, float cx, float cy,
         float outerR, float innerR, float start, float sweep)
     {
-        var path = new SKPath();
+        path.Rewind();
         path.ArcTo(new SKRect(cx-outerR, cy-outerR, cx+outerR, cy+outerR), start, sweep, true);
         path.ArcTo(new SKRect(cx-innerR, cy-innerR, cx+innerR, cy+innerR), start+sweep, -sweep, false);
         path.Close();
-        return path;
     }
 
-    private static void DrawSliceGlow(SKCanvas canvas, float cx, float cy,
+    private void DrawSliceGlow(SKCanvas canvas, float cx, float cy,
         float outerR, float innerR, float start, float sweep,
         AeroTheme theme, float alpha, float scale)
     {
@@ -879,17 +989,19 @@ internal sealed class OverlayRenderer : IDisposable
         glow = glow.WithAlpha((byte)(glow.Alpha * alpha));
         if (glow.Alpha < 4) return;
 
-        using var glowPath  = BuildSlicePath(cx, cy, outerR + 6f * scale, innerR - 4f * scale, start, sweep);
-        using var glowPaint = new SKPaint { IsAntialias = true, Color = glow };
-        glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 18f * scale);
-        canvas.DrawPath(glowPath, glowPaint);
+        BuildSlicePath(_path, cx, cy, outerR + 6f * scale, innerR - 4f * scale, start, sweep);
+        _glowFill.Style      = SKPaintStyle.Fill;
+        _glowFill.Color      = glow;
+        _glowFill.MaskFilter = GetBlur(18f * scale);
+        canvas.DrawPath(_path, _glowFill);
+        _glowFill.MaskFilter = null;
     }
 
     private void DrawSlice(SKCanvas canvas, float cx, float cy,
         float outerR, float innerR, float start, float sweep,
-        AeroTheme theme, bool hov, float alpha, float scale, bool empty = false)
+        AeroTheme theme, bool hov, float alpha, float scale, bool empty = false, bool outerGlow = true)
     {
-        using var path = BuildSlicePath(cx, cy, outerR, innerR, start, sweep);
+        BuildSlicePath(_path, cx, cy, outerR, innerR, start, sweep);
 
         // Resolve fill colors
         SKColor innerC, outerC;
@@ -918,53 +1030,47 @@ internal sealed class OverlayRenderer : IDisposable
 
         // Radial gradient spanning the ring's own inner→outer radius.
         // All rings (L1, L2, L3) use this path — each gets a gradient matched to its own radii.
-        float gradPos = outerR > 0f ? innerR / outerR : 0f;
-        var shader = SKShader.CreateRadialGradient(
-            new SKPoint(cx, cy), outerR,
-            [innerC.WithAlpha(ia), outerC.WithAlpha(oa)],
-            [gradPos.Clamp(0f, 0.95f), 1.0f],
-            SKShaderTileMode.Clamp);
-
-        using (shader)
-        {
-            _fill.Shader = shader;
-            canvas.DrawPath(path, _fill);
-            _fill.Shader = null;
-        }
+        // The shader is cached (keyed on radius + colors) so it isn't rebuilt every frame.
+        float gradPos = (outerR > 0f ? innerR / outerR : 0f).Clamp(0f, 0.95f);
+        _fill.Shader = GetGradient(cx, cy, outerR, innerC.WithAlpha(ia), outerC.WithAlpha(oa), gradPos);
+        _fill.Color  = SKColors.White; // opaque: alpha is baked into the gradient stops, so a
+                                       // leftover paint alpha (e.g. from DrawIndicatorDots) must
+                                       // not attenuate the shader.
+        canvas.DrawPath(_path, _fill);
+        _fill.Shader = null;
 
         // Border stroke — minimum 0.5px so arcs never collapse to sub-pixel jaggies
         _stroke.Color = theme.ToSKColor(hov && !empty ? theme.SliceStrokeHover : theme.SliceStroke)
                             .WithAlpha((byte)(255 * alpha * emptyMul));
         _stroke.StrokeWidth = Math.Max(theme.SliceStrokeWidth * scale, 0.5f);
-        canvas.DrawPath(path, _stroke);
+        canvas.DrawPath(_path, _stroke);
 
         // Outer edge accent arc with glow on hovered slice
         if (hov && !empty)
         {
             var accent = theme.ToSKColor(theme.AccentColor);
-            using var arcPath = new SKPath();
-            arcPath.ArcTo(
+            _arcPath.Rewind();
+            _arcPath.ArcTo(
                 new SKRect(cx-outerR+1.5f, cy-outerR+1.5f, cx+outerR-1.5f, cy+outerR-1.5f),
                 start+2f, sweep-4f, true);
 
-            // Glow layer
-            using var glowAp = new SKPaint
+            _arcStroke.Style     = SKPaintStyle.Stroke;
+            _arcStroke.StrokeCap = SKStrokeCap.Round;
+
+            // Glow layer (skipped when a child ring is open — its blur would bleed outward)
+            if (outerGlow)
             {
-                IsAntialias = true, Style = SKPaintStyle.Stroke,
-                StrokeWidth = 4f * scale, StrokeCap = SKStrokeCap.Round,
-                Color = accent.WithAlpha((byte)(100 * alpha)),
-            };
-            glowAp.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 5f * scale);
-            canvas.DrawPath(arcPath, glowAp);
+                _arcStroke.StrokeWidth = 4f * scale;
+                _arcStroke.Color       = accent.WithAlpha((byte)(100 * alpha));
+                _arcStroke.MaskFilter  = GetBlur(5f * scale);
+                canvas.DrawPath(_arcPath, _arcStroke);
+            }
 
             // Sharp edge layer
-            using var edgeAp = new SKPaint
-            {
-                IsAntialias = true, Style = SKPaintStyle.Stroke,
-                StrokeWidth = 2f * scale, StrokeCap = SKStrokeCap.Round,
-                Color = accent.WithAlpha((byte)(210 * alpha)),
-            };
-            canvas.DrawPath(arcPath, edgeAp);
+            _arcStroke.StrokeWidth = 2f * scale;
+            _arcStroke.Color       = accent.WithAlpha((byte)(210 * alpha));
+            _arcStroke.MaskFilter  = null;
+            canvas.DrawPath(_arcPath, _arcStroke);
         }
     }
 
@@ -1006,48 +1112,43 @@ internal sealed class OverlayRenderer : IDisposable
         byte trackA = (byte)(ac.Alpha * 0.18f * animAlpha);
         if (trackA > 0)
         {
-            using var tp = new SKPaint
-            {
-                IsAntialias = true, Style = SKPaintStyle.Stroke,
-                StrokeWidth = baseW, Color = arcColor.WithAlpha(trackA),
-            };
-            canvas.DrawCircle(cx, cy, arcR, tp);
+            _arcStroke.Style       = SKPaintStyle.Stroke;
+            _arcStroke.StrokeCap   = SKStrokeCap.Butt;
+            _arcStroke.StrokeWidth = baseW;
+            _arcStroke.MaskFilter  = null;
+            _arcStroke.Color       = arcColor.WithAlpha(trackA);
+            canvas.DrawCircle(cx, cy, arcR, _arcStroke);
         }
 
         if (vol > 0.005f)
         {
             float sweepDeg = vol * 360f;
-            using var arcPaint = new SKPaint
-            {
-                IsAntialias = true, Style = SKPaintStyle.Stroke,
-                StrokeWidth = flashW, StrokeCap = SKStrokeCap.Round,
-                Color = arcColor.WithAlpha((byte)(ac.Alpha * boostedA * animAlpha)),
-            };
-            using var arcPath = new SKPath();
-            arcPath.ArcTo(
+            _arcStroke.Style       = SKPaintStyle.Stroke;
+            _arcStroke.StrokeCap   = SKStrokeCap.Round;
+            _arcStroke.StrokeWidth = flashW;
+            _arcStroke.MaskFilter  = null;
+            _arcStroke.Color       = arcColor.WithAlpha((byte)(ac.Alpha * boostedA * animAlpha));
+            _arcPath.Rewind();
+            _arcPath.ArcTo(
                 new SKRect(cx - arcR, cy - arcR, cx + arcR, cy + arcR),
                 -90f, sweepDeg, true);
-            canvas.DrawPath(arcPath, arcPaint);
+            canvas.DrawPath(_arcPath, _arcStroke);
 
             // Glow dot at arc tip
             float tipAngle = (-90f + sweepDeg).ToRadians();
             float tx = cx + MathF.Cos(tipAngle) * arcR;
             float ty = cy + MathF.Sin(tipAngle) * arcR;
 
-            using var gp = new SKPaint
-            {
-                IsAntialias = true,
-                Color = arcColor.WithAlpha((byte)(ac.Alpha * (0.35f + 0.25f * flash) * animAlpha)),
-            };
-            gp.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, (4f + flash * 3f) * scale);
-            canvas.DrawCircle(tx, ty, (3.5f + flash * 1.5f) * scale, gp);
+            _glowFill.Style      = SKPaintStyle.Fill;
+            _glowFill.Color      = arcColor.WithAlpha((byte)(ac.Alpha * (0.35f + 0.25f * flash) * animAlpha));
+            _glowFill.MaskFilter = GetBlur((4f + flash * 3f) * scale);
+            canvas.DrawCircle(tx, ty, (3.5f + flash * 1.5f) * scale, _glowFill);
+            _glowFill.MaskFilter = null;
 
-            using var td = new SKPaint
-            {
-                IsAntialias = true,
-                Color = arcColor.WithAlpha((byte)(ac.Alpha * boostedA * animAlpha)),
-            };
-            canvas.DrawCircle(tx, ty, (2f + flash * 0.8f) * scale, td);
+            // Solid tip dot (no blur) — reuse the shared fill paint
+            _fill.Shader = null;
+            _fill.Color  = arcColor.WithAlpha((byte)(ac.Alpha * boostedA * animAlpha));
+            canvas.DrawCircle(tx, ty, (2f + flash * 0.8f) * scale, _fill);
         }
     }
 
@@ -1059,20 +1160,14 @@ internal sealed class OverlayRenderer : IDisposable
             / AppConstants.ShimmerPeriodMs * 360.0);
         var accent = theme.ToSKColor(theme.AccentColor);
 
-        var dashEffect = SKPathEffect.CreateDash([4f * scale, 12f * scale], 0f);
-        using var shimmerPaint = new SKPaint
-        {
-            IsAntialias  = true,
-            Style        = SKPaintStyle.Stroke,
-            StrokeWidth  = 0.5f * scale,
-            Color        = accent.WithAlpha((byte)(22 * alpha)),
-            PathEffect   = dashEffect,
-        };
+        _shimmerPaint.Style       = SKPaintStyle.Stroke;
+        _shimmerPaint.StrokeWidth = 0.5f * scale;
+        _shimmerPaint.Color       = accent.WithAlpha((byte)(22 * alpha));
+        _shimmerPaint.PathEffect  = GetShimmerDash(scale);
         canvas.Save();
         canvas.RotateDegrees(rotDeg, cx, cy);
-        canvas.DrawCircle(cx, cy, outerR, shimmerPaint);
+        canvas.DrawCircle(cx, cy, outerR, _shimmerPaint);
         canvas.Restore();
-        dashEffect.Dispose();
     }
 
     // Small accent dot on the outer rim for slices that have submenus
@@ -1130,12 +1225,13 @@ internal sealed class OverlayRenderer : IDisposable
         {
             bool  hov   = i == childHoveredIndex;
             float start = startOff + i * segAngle + gap / 2f;
-            DrawSlice(canvas, cx, cy, cOuterR, cInnerR, start, sweep, theme, hov, alpha, scale);
+            DrawSlice(canvas, cx, cy, cOuterR, cInnerR, start, sweep, theme, hov, alpha, scale, childMenu.Items[i].IsEmptySlot);
         }
 
         for (int i = 0; i < count; i++)
         {
             var   item = childMenu.Items[i];
+            if (item.IsEmptySlot) continue;
             bool  hov  = i == childHoveredIndex;
             float mid  = startOff + i * segAngle + segAngle / 2f;
             float rad  = mid.ToRadians();
@@ -1178,12 +1274,13 @@ internal sealed class OverlayRenderer : IDisposable
         {
             bool  hov   = i == l3HoveredIndex;
             float start = startOff + i * segAngle + gap / 2f;
-            DrawSlice(canvas, cx, cy, l3OuterR, l3InnerR, start, sweep, theme, hov, alpha, scale);
+            DrawSlice(canvas, cx, cy, l3OuterR, l3InnerR, start, sweep, theme, hov, alpha, scale, l3Menu.Items[i].IsEmptySlot);
         }
 
         for (int i = 0; i < count; i++)
         {
             var   item = l3Menu.Items[i];
+            if (item.IsEmptySlot) continue;
             bool  hov  = i == l3HoveredIndex;
             float mid  = startOff + i * segAngle + segAngle / 2f;
             float rad  = mid.ToRadians();
@@ -1263,18 +1360,17 @@ internal sealed class OverlayRenderer : IDisposable
             float aw  = 6f * scale;
             float ah  = 4.5f * scale;
             float ay  = cy - 9f * scale;
-            using var arrowPath = new SKPath();
-            arrowPath.MoveTo(cx + aw * 0.4f, ay - ah);
-            arrowPath.LineTo(cx - aw * 0.5f, ay);
-            arrowPath.LineTo(cx + aw * 0.4f, ay + ah);
-            using var ap = new SKPaint
-            {
-                IsAntialias = true, Style = SKPaintStyle.Stroke,
-                StrokeWidth = 2f * scale, StrokeCap = SKStrokeCap.Round,
-                StrokeJoin  = SKStrokeJoin.Round,
-                Color = theme.ToSKColor(theme.AccentColor).WithAlpha((byte)(210 * alpha)),
-            };
-            canvas.DrawPath(arrowPath, ap);
+            _arcPath.Rewind();
+            _arcPath.MoveTo(cx + aw * 0.4f, ay - ah);
+            _arcPath.LineTo(cx - aw * 0.5f, ay);
+            _arcPath.LineTo(cx + aw * 0.4f, ay + ah);
+            _arcStroke.Style       = SKPaintStyle.Stroke;
+            _arcStroke.StrokeWidth = 2f * scale;
+            _arcStroke.StrokeCap   = SKStrokeCap.Round;
+            _arcStroke.StrokeJoin  = SKStrokeJoin.Round;
+            _arcStroke.MaskFilter  = null;
+            _arcStroke.Color       = theme.ToSKColor(theme.AccentColor).WithAlpha((byte)(210 * alpha));
+            canvas.DrawPath(_arcPath, _arcStroke);
             textY = cy + 8f * scale;
         }
 
@@ -1314,39 +1410,54 @@ internal sealed class OverlayRenderer : IDisposable
         if (bmp is null) return;
         float size = (hov ? 27f : 22f) * scale;
         var dest = new SKRect(x-size/2, y-size/2, x+size/2, y+size/2);
-        using var p = new SKPaint { IsAntialias = true, FilterQuality = SKFilterQuality.High };
-        var tint = theme.ToSKColor(hov ? theme.IconTintHover : theme.IconTint);
-        p.ColorFilter = SKColorFilter.CreateBlendMode(
-            tint.WithAlpha((byte)(255 * alpha)), SKBlendMode.Modulate);
-        canvas.DrawBitmap(bmp, dest, p);
+        // Built-in icons are drawn white, so Modulate with the theme tint recolors them.
+        // Full-color exe/image icons must NOT be tinted (a dark tint in a light theme would
+        // multiply them toward black) — use white so Modulate preserves their real colors
+        // while still applying the ring fade via alpha.
+        var tint = IconRegistry.IsBuiltIn(item.Icon)
+            ? theme.ToSKColor(hov ? theme.IconTintHover : theme.IconTint)
+            : SKColors.White;
+        _iconPaint.ColorFilter = GetIconFilter(tint.WithAlpha((byte)(255 * alpha)));
+        canvas.DrawBitmap(bmp, dest, _iconPaint);
     }
 
-    private void DrawLabel(SKCanvas canvas, float cx, float cy,
-        float r, float angleDeg, string text,
-        AeroTheme theme, bool hov, float alpha)
+    // Now-playing media title, centered below the ring.
+    private void DrawNowPlaying(SKCanvas canvas, float cx, float y, string text,
+        AeroTheme theme, float alpha, float scale)
     {
-        float rad = angleDeg.ToRadians();
-        _text.TextSize  = theme.LabelFontSize;
+        string t = text.Length > 40 ? text[..39] + "…" : text;
+        _text.TextSize  = 11f * scale;
         _text.Typeface  = GetTypeface(theme.LabelFontFamily);
         _text.TextAlign = SKTextAlign.Center;
-        _text.Color     = theme.ToSKColor(hov ? theme.LabelColorHover : theme.LabelColor)
-                              .WithAlpha((byte)(255 * alpha));
-        canvas.DrawText(text,
-            cx + MathF.Cos(rad) * r,
-            cy + MathF.Sin(rad) * r + 5f, _text);
+        _text.Color     = theme.ToSKColor(theme.LabelColor).WithAlpha((byte)(210 * alpha));
+        canvas.DrawText(t, cx, y, _text);
     }
 
-    private void DrawBreadcrumb(SKCanvas canvas, float cx, float logical,
-        string name, AeroTheme theme, float alpha, float scale)
+    // Small decorative audio visualizer — bars driven by the polled volume level + a per-bar
+    // sine wave. Theme-accent colored, subtle. Not a real spectrum (no capture/FFT), ~free.
+    private void DrawVisualizer(SKCanvas canvas, float cx, float baselineY,
+        AeroTheme theme, float alpha, float scale, float level)
     {
-        float barH = 22f*scale, barW = 130f*scale, r = 11f*scale;
-        float bx = cx-barW/2, by = logical-barH-16f*scale;
-        _fill.Color = theme.ToSKColor(theme.BreadcrumbFill).WithAlpha((byte)(210 * alpha));
-        canvas.DrawRoundRect(bx, by, barW, barH, r, r, _fill);
-        _text.TextSize  = 10f * scale;
-        _text.TextAlign = SKTextAlign.Center;
-        _text.Color     = theme.ToSKColor(theme.BreadcrumbText).WithAlpha((byte)(210 * alpha));
-        canvas.DrawText(name, cx, by+barH-6f*scale, _text);
+        const int bars = 7;
+        float bw    = 3f * scale;
+        float gap   = 3f * scale;
+        float maxH  = 15f * scale;
+        float total = bars * bw + (bars - 1) * gap;
+        float x0    = cx - total / 2f;
+        long  t     = _clock.ElapsedMilliseconds;
+        float lvl   = Math.Clamp(level, 0.06f, 1f);
+
+        var accent = theme.ToSKColor(theme.AccentColor);
+        _fill.Shader = null;
+        _fill.Color  = accent.WithAlpha((byte)(190 * alpha));
+        for (int i = 0; i < bars; i++)
+        {
+            float phase = t / 260f + i * 0.8f;
+            float wave  = 0.30f + 0.70f * (0.5f + 0.5f * MathF.Sin(phase));
+            float h     = MathF.Max(1.5f * scale, maxH * lvl * wave);
+            float bx    = x0 + i * (bw + gap);
+            canvas.DrawRoundRect(bx, baselineY - h, bw, h, bw * 0.4f, bw * 0.4f, _fill);
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
@@ -1456,7 +1567,23 @@ internal sealed class OverlayRenderer : IDisposable
         _renderRunning = false;
         Interlocked.Increment(ref _renderGeneration);
         _renderThread?.Join(200); // wait for render thread to finish its current frame
+
+        // Drop references to cached effects before disposing paints, then dispose
+        // the caches themselves (they own the native effect handles).
+        _fill.Shader = null;
+        _glowFill.MaskFilter = null;
+        _arcStroke.MaskFilter = null;
+        _shimmerPaint.PathEffect = null;
+        _iconPaint.ColorFilter = null;
+
         _fill.Dispose(); _stroke.Dispose(); _text.Dispose();
+        _glowFill.Dispose(); _arcStroke.Dispose(); _iconPaint.Dispose(); _shimmerPaint.Dispose();
+        _path.Dispose(); _arcPath.Dispose();
+
+        foreach (var m in _blurCache.Values) m.Dispose(); _blurCache.Clear();
+        ClearGradientCache();
+        foreach (var f in _iconFilterCache.Values) f.Dispose(); _iconFilterCache.Clear();
+        _shimmerDash?.Dispose();
         _cachedTypeface?.Dispose();
         ReleaseDIBSection();
     }

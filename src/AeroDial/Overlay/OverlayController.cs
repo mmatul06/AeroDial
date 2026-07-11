@@ -219,9 +219,12 @@ internal sealed class OverlayController : IDisposable
 
         if (item.ActionType == ActionType.SubMenu && item.SubMenuId is not null)
         {
-            // Switch the child ring to this submenu (no-op if already showing the same one)
+            // Switch the child ring to this submenu. Re-sync also when the parent slice
+            // changes (even if it resolves to the same submenu object) — otherwise stale
+            // _childParentIndex / L3 / ring-thinning state carries over and the child ring
+            // renders differently depending on which parent opened it.
             var sub = ResolveSubMenu(item.SubMenuId);
-            if (sub is not null && sub != _childMenu)
+            if (sub is not null && (sub != _childMenu || index != _childParentIndex))
             {
                 _childMenu         = sub;
                 _childParentIndex  = index;
@@ -537,7 +540,8 @@ internal sealed class OverlayController : IDisposable
         {
             var hwnd = Win32.GetForegroundWindow();
             Win32.GetWindowThreadProcessId(hwnd, out uint pid);
-            return Process.GetProcessById((int)pid).ProcessName;
+            using var proc = Process.GetProcessById((int)pid);
+            return proc.ProcessName;
         }
         catch { return null; }
     }

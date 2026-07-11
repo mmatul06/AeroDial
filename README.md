@@ -5,10 +5,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2B-blue)](https://github.com/mmatul06/AeroDial)
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-purple)](https://dotnet.microsoft.com/)
-![Version](https://img.shields.io/github/v/release/mmatul06/MuteMaster)
-![Downloads](https://img.shields.io/github/downloads/mmatul06/MuteMaster/total)
+![Version](https://img.shields.io/github/v/release/mmatul06/AeroDial)
+![Downloads](https://img.shields.io/github/downloads/mmatul06/AeroDial/total)
 
-AeroDial opens a customisable radial menu wherever your cursor is, triggered by any key or mouse button, letting you launch apps, fire key combos, control media, paste clipboard snippets, and navigate nested submenus without touching your taskbar. It works on top of any application including fullscreen games, across any number of monitors at any DPI scale.
+AeroDial opens a customisable radial menu wherever your cursor is, triggered by any key or mouse button, letting you launch apps, fire key combos, run multi-step keyboard macros, control media, paste clipboard snippets, and navigate nested submenus without touching your taskbar. It can swap to a different menu per app, show the currently-playing track, and it works on top of any application including fullscreen games, across any number of monitors at any DPI scale.
 
 ---
 ## Screenshots
@@ -19,9 +19,9 @@ AeroDial opens a customisable radial menu wherever your cursor is, triggered by 
 
 ## Download
 
-**[⬇ Download AeroDial v1.0.0](https://github.com/mmatul06/AeroDial/releases/latest)**
+**[⬇ Download AeroDial v2.0.0](https://github.com/mmatul06/AeroDial/releases/latest)**
 
-Download and run `AeroDial_v1.0.0.exe`. No installer required.
+Download and run `AeroDial.exe` (a single self-contained executable). No installer required.
 
 AeroDial starts silently in the system tray. Double Click on System Tray icon to open the Settings window.
 
@@ -53,11 +53,25 @@ AeroDial starts silently in the system tray. Double Click on System Tray icon to
 | Launch app | Start any executable with optional arguments |
 | Open URL | Open any URL in the default browser |
 | Key combo | Send any keystroke combination (e.g. Win+D, Ctrl+Shift+T) |
+| Macro | Run an ordered sequence of keystrokes, typed text, and delays |
 | Media | Play/Pause, Next, Previous, Volume Up/Down, Mute |
 | Run script | Execute .bat or .ps1 scripts |
 | Paste clipboard | Set clipboard text and paste it |
 | Submenu | Open a nested child ring |
 | Focus window | Bring an open window to the foreground |
+
+### Macros
+Chain multiple steps into one slice — for example, type `FILLET` then press `Enter` in a CAD app, or hold `Shift` across several keystrokes:
+
+- **Type text** — types a literal string (sent as Unicode, so it's keyboard-layout independent)
+- **Press key** — a single key or chord (e.g. `Enter`, `Tab`, `Ctrl+S`)
+- **Key down / Key up** — hold a key across later steps and release it when you want
+- **Delay** — wait a set number of milliseconds between steps
+
+Build macros step-by-step in the menu editor. Keystrokes land in whatever app was focused before the dial opened.
+
+### App profiles (context-aware menus)
+Bind a specific menu to a specific app. When that app is in the foreground and you open the dial, it shows the assigned menu instead of the default — a CAD dial for AutoCAD, an editing dial for Photoshop, and so on. Set these up in **Settings → App Profiles** (with an "add from running app" picker); other apps fall back to the default menu.
 
 ### Dynamic submenus (built automatically, no setup needed)
 - **Active Tasks** (`__active_tasks__`) -- live list of open windows with per-app icons, rebuilt on every open
@@ -70,6 +84,12 @@ AeroDial starts silently in the system tray. Double Click on System Tray icon to
 - Theme Editor in Settings: create themes with 17 color fields and color-picker flyouts
 - Smooth ease-out open/close animations; respects Windows animation preference
 - Per-pixel transparency via DWM
+
+### Now playing
+- Shows the currently-playing track title below the ring while media is playing
+- An optional theme-coloured audio visualizer that pulses with the volume level
+- Updates live when you change tracks (from the dial or anywhere) — reads the real Windows media session, so it works with any player that integrates with Windows (Spotify, Chrome/Edge/Firefox, Groove, VLC, and more)
+- Both are toggleable in **Settings → Appearance**
 
 ### Scroll wheel
 - Scroll wheel captured while overlay is open
@@ -99,14 +119,14 @@ AeroDial starts silently in the system tray. Double Click on System Tray icon to
 
 ## Installation
 
-1. Download `AeroDial_v.1.0.0.exe` from [Releases](../../releases)
-2. Run `AeroDial.exe`
+1. Download `AeroDial.exe` (v2.0.0) from [Releases](../../releases)
+2. Run it — it's a **single self-contained executable**: no installer, no extraction, no separate .NET runtime
 3. AeroDial starts silently in the system tray
 4. Right-click the tray icon and choose **Settings** to configure your trigger and menus
 
-No installer, admin rights, registry writes are needed.
+No admin rights or registry writes are needed (other than the optional "start with Windows" toggle).
 
-To uninstall: quit from the tray, delete the folder, optionally delete `%AppData%\Roaming\AeroDial` where themes and config files are stored.
+To uninstall: quit from the tray, delete `AeroDial.exe`, optionally delete `%AppData%\Roaming\AeroDial` where config and user themes are stored.
 
 ---
 
@@ -124,7 +144,14 @@ The default trigger is **Middle Mouse Button**. Press it anywhere on the desktop
 Open Settings (tray right-click) → **Trigger** → click **Record key or button**, then press your desired key or mouse button.
 
 ### Adding menu items
-Settings → **Menus** → select a slice in the ring preview → fill in the action type, label, and icon.
+Settings → **Menus**. The ring preview *is* the editor:
+
+- **Click a `+` slot** on the ring to add an item there
+- **Click a slice** to edit its label, icon, and action
+- **Drag a slice** onto another slot to move or swap it
+- **Remove** leaves an empty slot in place, so you control exactly where each item and gap sits
+- Click a submenu slice's **"Open / edit this submenu"** to drill in; use the breadcrumb to climb back
+- Edits stay in a working copy — **Save** commits them, **Discard** reverts
 
 ### Changing the theme
 Settings → **Themes** → click **Apply** next to any theme.
@@ -136,7 +163,7 @@ Settings → **Themes** → click **Apply** next to any theme.
 - Config file: `%AppData%\Roaming\AeroDial\config.json`
 - Log file: `%AppData%\Roaming\AeroDial\aerodial.log`
 - User themes: `%AppData%\Roaming\AeroDial\themes\`
-- Built-in themes: `themes\` folder next to `AeroDial.exe`
+- Built-in themes: compiled into the app (no external files needed); a `themes\` folder next to `AeroDial.exe` is also loaded if present
 
 If the config is corrupt, delete `config.json` and restart -- the app recreates defaults automatically.
 
@@ -161,21 +188,16 @@ Output: `src/AeroDial/bin/Debug/net9.0-windows10.0.26100.0/win-x64/`
 ## Publishing a release build
 
 ```bash
-dotnet publish src/AeroDial/AeroDial.csproj ^
-  -c Release ^
-  -r win-x64 ^
-  --self-contained true ^
-  -p:PublishTrimmed=true ^
-  -p:TrimMode=partial ^
-  -p:PublishReadyToRun=true
+dotnet publish src/AeroDial/AeroDial.csproj -c Release -r win-x64
 ```
 
-Output: `src/AeroDial/bin/Release/net9.0-windows10.0.26100.0/win-x64/publish/`
+Output: `src/AeroDial/bin/Release/net9.0-windows10.0.26100.0/win-x64/publish/AeroDial.exe`
 
-Zip the entire `publish\` folder contents and upload to Releases. The `.pdb` files are stripped by the Release PropertyGroup (`DebugType=none`), so the zip contains only runtime files.
+This is a **single self-contained executable** (~110 MB, compressed). The .NET runtime, the WinUI 3 native DLLs, and SkiaSharp are all bundled and self-extracted at runtime; the 11 built-in themes are compiled into the app, so no side files are needed. Upload the `.exe` directly to Releases.
 
-**Size notes:**
-- Raw self-contained file: ~200-250 MB
+The single-file settings live in the csproj Release `PropertyGroup` (`PublishSingleFile`, `IncludeNativeLibrariesForSelfExtract`, `EnableCompressionInSingleFile`) plus `EnableMsixTooling=true`, so the plain `dotnet publish -c Release -r win-x64` above produces the single exe with no extra flags.
+
+> **Trimming is intentionally disabled.** AeroDial relies on reflection-based `System.Text.Json` (config, themes, menus) and built-in COM (`AudioService`'s WASAPI volume access); enabling `PublishTrimmed` turns on .NET feature switches that disable both and breaks config load/save and audio at runtime. Do not add `-p:PublishTrimmed=true`.
 
 ---
 

@@ -294,7 +294,7 @@ public sealed partial class TriggerPage : Page
 public sealed partial class AppearancePage : Page
 {
     private Slider       _scale = null!, _gap = null!, _opacity = null!, _detach = null!;
-    private ToggleSwitch _anim = null!, _sysAnim = null!, _labels = null!;
+    private ToggleSwitch _anim = null!, _sysAnim = null!, _nowPlaying = null!, _visualizer = null!;
     private RadioButton  _slice4 = null!, _slice6 = null!, _slice8 = null!, _slice10 = null!, _slice12 = null!;
     private ComboBox     _volVisibility = null!;
     private TextBlock    _saved = null!;
@@ -374,14 +374,6 @@ public sealed partial class AppearancePage : Page
         stack.Children.Add(_anim);
         stack.Children.Add(_sysAnim);
 
-        stack.Children.Add(UI.SubHeader("Ring elements"));
-        _labels = new ToggleSwitch
-        {
-            Header = "Show slice labels", IsOn = cfg.ShowLabels,
-            OnContent = "On", OffContent = "Off: icons only",
-        };
-        stack.Children.Add(_labels);
-
         // Volume ring visibility
         stack.Children.Add(UI.SubHeader("Volume ring"));
         _volVisibility = new ComboBox
@@ -392,19 +384,35 @@ public sealed partial class AppearancePage : Page
         };
         stack.Children.Add(_volVisibility);
 
+        // Media info
+        stack.Children.Add(UI.SubHeader("Media"));
+        _nowPlaying = new ToggleSwitch
+        {
+            Header = "Show now-playing title below the ring", IsOn = cfg.ShowNowPlaying,
+            OnContent = "On", OffContent = "Off",
+        };
+        _visualizer = new ToggleSwitch
+        {
+            Header = "Show audio visualizer while media plays", IsOn = cfg.ShowVisualizer,
+            OnContent = "On", OffContent = "Off",
+        };
+        stack.Children.Add(_nowPlaying);
+        stack.Children.Add(_visualizer);
+
         // Auto-save: any change schedules a debounced save and refreshes the preview
         void WireChange() { ScheduleSave(); _previewCanvas?.Invalidate(); }
         foreach (var sl in new[] { _scale, _gap, _opacity, _detach })
             sl.ValueChanged += (_, _) => WireChange();
         _anim.Toggled    += (_, _) => WireChange();
         _sysAnim.Toggled += (_, _) => WireChange();
-        _labels.Toggled  += (_, _) => WireChange();
         _slice4.Checked              += (_, _) => WireChange();
         _slice6.Checked              += (_, _) => WireChange();
         _slice8.Checked              += (_, _) => WireChange();
         _slice10.Checked             += (_, _) => WireChange();
         _slice12.Checked             += (_, _) => WireChange();
         _volVisibility.SelectionChanged += (_, _) => WireChange();
+        _nowPlaying.Toggled += (_, _) => WireChange();
+        _visualizer.Toggled += (_, _) => WireChange();
 
         _saved = UI.SavedBadge();
         _saved.Margin = new Thickness(0, 6, 0, 0);
@@ -445,8 +453,9 @@ public sealed partial class AppearancePage : Page
             cfg.Appearance.RingInnerDetach              = (float)_detach.Value;
             cfg.Appearance.AnimationsEnabled            = _anim.IsOn;
             cfg.Appearance.RespectSystemAnimationSetting = _sysAnim.IsOn;
-            cfg.Appearance.ShowLabels                   = _labels.IsOn;
             cfg.Appearance.VolumeRingVisibility         = (AeroDial.Config.VolumeRingVisibility)_volVisibility.SelectedIndex;
+            cfg.Appearance.ShowNowPlaying               = _nowPlaying.IsOn;
+            cfg.Appearance.ShowVisualizer               = _visualizer.IsOn;
         });
         _saved.Visibility = Visibility.Visible;
         await Task.Delay(2000);
@@ -543,7 +552,7 @@ public sealed partial class AppearancePage : Page
 public sealed partial class BehaviorPage : Page
 {
     // Hold-mode controls
-    private ToggleSwitch _launch = null!;
+    private ToggleSwitch? _launch;  // only created in Hold mode
 
     // Toggle-mode controls
     private ComboBox     _mode  = null!;
@@ -580,6 +589,7 @@ public sealed partial class BehaviorPage : Page
                 OffContent = "Off",
             };
             stack.Children.Add(_launch);
+            _launch.Toggled += (_, _) => ScheduleSave();
 
             _mode = new ComboBox
             {
@@ -633,9 +643,6 @@ public sealed partial class BehaviorPage : Page
             _mode.SelectionChanged += (_, _) =>
                 _dwellRow.Visibility = _mode.SelectedIndex == 0
                     ? Visibility.Visible : Visibility.Collapsed;
-
-            // Dummy launch control (not shown in Toggle mode)
-            _launch = new ToggleSwitch { IsOn = false, Visibility = Visibility.Collapsed };
         }
 
         // ── After executing ───────────────────────────────────────────────
@@ -715,7 +722,6 @@ public sealed partial class BehaviorPage : Page
         // Auto-save wiring
         _mode.SelectionChanged  += (_, _) => ScheduleSave();
         _dwell.ValueChanged     += (_, _) => ScheduleSave();
-        _launch.Toggled         += (_, _) => ScheduleSave();
         _close.Toggled          += (_, _) => ScheduleSave();
         _closeOutside.Toggled   += (_, _) => ScheduleSave();
         _startup.Toggled        += (_, _) => ScheduleSave();
@@ -734,7 +740,7 @@ public sealed partial class BehaviorPage : Page
         {
             if (holdMode)
             {
-                cfg.Behavior.LaunchOnRelease = _launch.IsOn;
+                cfg.Behavior.LaunchOnRelease = _launch!.IsOn;
                 cfg.Behavior.HoverDwellMs    = (int)_dwell.Value;
                 // 0=Click, 1=HoverDwell
                 cfg.Behavior.SelectionMode   = _mode.SelectedIndex == 1
@@ -808,10 +814,14 @@ public sealed partial class MenusPage : Page
 
     // Left panel
     private ComboBox    _menuCombo  = null!;
-    private ListView    _itemList   = null!;
     private SKXamlCanvas _ringCanvas = null!;
     private TextBlock   _saved      = null!;
-    private Button      _addItemBtn = null!;
+
+    // Ring drag-to-move state
+    private int _dragSrcSlice   = -1;
+    private int _dragHoverSlice = -1;
+    private bool _dragging;
+    private Windows.Foundation.Point _dragStart;
 
     // Editor card
     private Border        _editorCard  = null!;
@@ -825,13 +835,27 @@ public sealed partial class MenusPage : Page
     // Payload panes (shown/hidden based on selected ActionType)
     private StackPanel _appPane    = null!, _urlPane   = null!, _comboPane  = null!,
                        _mediaPane  = null!, _subPane   = null!, _scriptPane = null!,
-                       _clipPane   = null!;
+                       _clipPane   = null!, _macroPane = null!;
     private TextBox    _appPath    = null!, _appArgs   = null!, _urlBox     = null!,
                        _comboBox   = null!, _scriptBox = null!, _clipBox    = null!;
     private ComboBox   _mediaCombo = null!, _subMenuSel = null!;
 
+    // Macro editor (step list) working state for the currently-edited item
+    private StackPanel      _macroRows  = null!;
+    private List<MacroStep> _macroSteps = [];
+
+    // Unsaved-changes bar (visibility is the source of truth)
+    private Border _dirtyBar = null!;
+
+    // Drill-in breadcrumb: menu ids from root of the current drill path (last = current)
+    private readonly List<string> _crumb = [];
+    private StackPanel _crumbBar = null!;
+    private Border     _profileBadge = null!;
+
     private static readonly string[] EditableActionTypes =
-        ["None", "LaunchApp", "OpenUrl", "KeyCombo", "Media", "RunScript", "PasteClipboard", "SubMenu", "OpenSettings"];
+        ["None", "LaunchApp", "OpenUrl", "KeyCombo", "Macro", "Media", "RunScript", "PasteClipboard", "SubMenu", "OpenSettings"];
+
+    private static readonly string[] MacroStepNames = ["Type text", "Press key", "Key down", "Key up", "Delay"];
 
     public MenusPage()
     {
@@ -872,45 +896,56 @@ public sealed partial class MenusPage : Page
         menuRow.Children.Add(Btn("Save preset", (s, e) => SaveAsPresetAsync().FireAndForget()));
         root.Children.Add(menuRow);
 
+        // ── Breadcrumb (drill path) + profile-binding badge ──────────────
+        var crumbBadgeRow = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+        crumbBadgeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        crumbBadgeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _crumbBar = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        _profileBadge = new Border
+        {
+            Background        = new SolidColorBrush(ColorHelper.FromArgb(40, 120, 110, 200)),
+            CornerRadius      = new CornerRadius(10),
+            Padding           = new Thickness(10, 3, 10, 3),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock
+            {
+                Text = "Not bound to any app", FontSize = 12,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(230, 200, 200, 230)),
+            },
+        };
+        ToolTipService.SetToolTip(_profileBadge, "Manage bindings on the App Profiles page");
+        Grid.SetColumn(_crumbBar, 0);
+        Grid.SetColumn(_profileBadge, 1);
+        crumbBadgeRow.Children.Add(_crumbBar);
+        crumbBadgeRow.Children.Add(_profileBadge);
+        root.Children.Add(crumbBadgeRow);
+
         // ── Two-column layout: ring + item list (left) | item editor (right) ──
         var twoCol = new Grid();
         twoCol.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
         twoCol.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        // Left column — ring preview + item list + reorder buttons
+        // Left column — the ring IS the item editor (click to edit, click + to add, drag to move)
         var leftCol = new StackPanel { Spacing = 6, Margin = new Thickness(0, 0, 14, 0) };
 
-        // Ring canvas
-        _ringCanvas = new SKXamlCanvas { Width = 230, Height = 230,
-                                          HorizontalAlignment = HorizontalAlignment.Center };
-        _ringCanvas.PaintSurface  += OnRingPaint;
-        _ringCanvas.PointerPressed += OnRingClick;
+        _ringCanvas = new SKXamlCanvas
+        {
+            Width  = 240, Height = 240,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        _ringCanvas.PaintSurface    += OnRingPaint;
+        _ringCanvas.PointerPressed  += OnRingPointerPressed;
+        _ringCanvas.PointerMoved    += OnRingPointerMoved;
+        _ringCanvas.PointerReleased += OnRingPointerReleased;
         leftCol.Children.Add(_ringCanvas);
 
         leftCol.Children.Add(new TextBlock
         {
-            Text = "Items", FontSize = 13,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 130, 120, 200)),
+            Text = "Click a slice to edit. Click a + slot to add. Drag a slice to move or swap.",
+            FontSize = 12, TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            Margin = new Thickness(0, 2, 0, 0),
         });
-        _itemList = new ListView { Height = 150, SelectionMode = ListViewSelectionMode.Single };
-        _itemList.SelectionChanged += (_, _) =>
-        {
-            if (!_rebuildingList)
-            {
-                SelectItem(_itemList.SelectedIndex);
-                _ringCanvas.Invalidate();
-            }
-        };
-        leftCol.Children.Add(_itemList);
-
-        var itemBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        _addItemBtn = Btn("+", AddItem);
-        itemBtns.Children.Add(_addItemBtn);
-        itemBtns.Children.Add(Btn("−",  RemoveItem));
-        itemBtns.Children.Add(Btn("↑",  MoveUp));
-        itemBtns.Children.Add(Btn("↓",  MoveDown));
-        leftCol.Children.Add(itemBtns);
 
         Grid.SetColumn(leftCol, 0);
         twoCol.Children.Add(leftCol);
@@ -922,12 +957,26 @@ public sealed partial class MenusPage : Page
 
         root.Children.Add(twoCol);
 
-        // ── Save row ──────────────────────────────────────────────────────
+        // ── Save row / dirty bar ──────────────────────────────────────────
         var saveBtn = UI.SaveButton(); _saved = UI.SavedBadge();
         saveBtn.Click += Save;
+        var discardBtn = new Button { Content = "Discard changes" };
+        discardBtn.Click += Discard;
+        var warn = new TextBlock
+        {
+            Text = "Unsaved changes", FontSize = 13,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 240, 190, 90)),
+        };
+        var dirtyInner = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
+        dirtyInner.Children.Add(warn);
+        dirtyInner.Children.Add(discardBtn);
+        _dirtyBar = new Border { Visibility = Visibility.Collapsed, VerticalAlignment = VerticalAlignment.Center, Child = dirtyInner };
+
         var saveRow = new StackPanel
             { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(0, 14, 0, 0) };
         saveRow.Children.Add(saveBtn);
+        saveRow.Children.Add(_dirtyBar);
         saveRow.Children.Add(_saved);
         root.Children.Add(saveRow);
 
@@ -948,12 +997,27 @@ public sealed partial class MenusPage : Page
         };
         var s = new StackPanel { Spacing = 6 };
 
-        s.Children.Add(new TextBlock
+        var headerRow = new Grid { Margin = new Thickness(0, 0, 0, 2) };
+        headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var headerText = new TextBlock
         {
             Text = "Edit item", FontSize = 14,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 2),
-        });
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var removeBtn = new Button
+        {
+            Content    = "Remove",
+            Padding    = new Thickness(8, 4, 8, 4),
+            Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 255, 120, 120)),
+        };
+        removeBtn.Click += RemoveItem;
+        Grid.SetColumn(headerText, 0);
+        Grid.SetColumn(removeBtn, 1);
+        headerRow.Children.Add(headerText);
+        headerRow.Children.Add(removeBtn);
+        s.Children.Add(headerRow);
 
         // Label
         s.Children.Add(new TextBlock { Text = "Label", FontSize = 12 });
@@ -1177,6 +1241,12 @@ public sealed partial class MenusPage : Page
         _subPane.Children.Add(new TextBlock { Text = "Target submenu", FontSize = 12 });
         _subMenuSel = new ComboBox { Width = 260 };
         _subPane.Children.Add(_subMenuSel);
+        var editSubBtn = new Button { Content = "Open / edit this submenu", Margin = new Thickness(0, 4, 0, 0) };
+        editSubBtn.Click += (_, _) =>
+        {
+            if (_subMenuSel.SelectedItem is ComboBoxItem sci && sci.Tag is string sid) DrillInto(sid);
+        };
+        _subPane.Children.Add(editSubBtn);
 
         _scriptPane = Pane();
         _scriptPane.Children.Add(new TextBlock { Text = "Script path  (.bat or .ps1)", FontSize = 12 });
@@ -1187,6 +1257,27 @@ public sealed partial class MenusPage : Page
         _clipPane.Children.Add(new TextBlock { Text = "Text to paste", FontSize = 12 });
         _clipBox  = new TextBox { PlaceholderText = "Text to paste…", AcceptsReturn = true, Height = 70 };
         _clipPane.Children.Add(_clipBox);
+
+        _macroPane = Pane();
+        _macroPane.Children.Add(new TextBlock { Text = "Macro steps", FontSize = 12 });
+        _macroRows = new StackPanel { Spacing = 4 };
+        _macroPane.Children.Add(_macroRows);
+        var addStepBtn = new Button { Content = "+ Add step", Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 4, 0, 0) };
+        addStepBtn.Click += (_, _) =>
+        {
+            _macroSteps.Add(new MacroStep { Type = MacroStepType.TypeText, Value = "" });
+            RebuildMacroRows();
+            MarkDirty();
+        };
+        _macroPane.Children.Add(addStepBtn);
+        _macroPane.Children.Add(new TextBlock
+        {
+            Text = "Text steps type literal characters. Use Press key for Enter, Tab, or chords like Ctrl+S. " +
+                   "Key down and Key up hold a key across later steps.",
+            FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            Margin = new Thickness(0, 2, 0, 0),
+        });
 
         s.Children.Add(payloads);
 
@@ -1225,7 +1316,16 @@ public sealed partial class MenusPage : Page
             _subMenuSel.Items.Add(new ComboBoxItem { Content = m.Name, Tag = m.Id });
     }
 
+    // Entry from the menu dropdown — resets the drill breadcrumb to this menu.
     private void SelectMenu(int idx)
+    {
+        _crumb.Clear();
+        if (idx >= 0 && idx < _menus.Count) _crumb.Add(_menus[idx].Id);
+        ShowMenu(idx);
+    }
+
+    // Navigate to a menu by index without touching the breadcrumb.
+    private void ShowMenu(int idx)
     {
         _menuIdx = idx;
         _itemIdx = -1;
@@ -1233,35 +1333,123 @@ public sealed partial class MenusPage : Page
         RefreshItemList();
         PopulateSubMenuPicker();
         _ringCanvas?.Invalidate();
+        UpdateCrumb();
+        UpdateProfileBadge();
     }
 
-    private void RefreshItemList()
+    // Drill into a submenu (only if its target is an editable menu in this config).
+    private void DrillInto(string childMenuId)
     {
-        _rebuildingList = true;
-        _itemList.Items.Clear();
-        if (Live is not null)
-            foreach (var item in Live.Items)
-                _itemList.Items.Add(new ListViewItem { Content = $"{item.Label}  [{item.ActionType}]" });
-        _rebuildingList = false;
-        UpdateAddItemBtn();
+        int idx = _menus.FindIndex(m => m.Id == childMenuId);
+        if (idx < 0) return; // dynamic/built-in target (Active Apps / Clipboard) — not editable here
+        _crumb.Add(childMenuId);
+        _rebuildingList = true; _menuCombo.SelectedIndex = idx; _rebuildingList = false;
+        ShowMenu(idx);
     }
 
-    private void UpdateAddItemBtn()
+    private void CrumbClickToDepth(int depth)
     {
-        if (_addItemBtn is null || Live is null) return;
-        int  sliceCount = App.Config.Current.Appearance.SliceCount;
-        bool full       = Live.Items.Count >= sliceCount;
-        _addItemBtn.IsEnabled = !full;
-        ToolTipService.SetToolTip(_addItemBtn,
-            full ? $"Menu is full — {sliceCount} items max (change Slice Count in Appearance)" : null);
+        if (depth < 0 || depth >= _crumb.Count) return;
+        string id = _crumb[depth];
+        _crumb.RemoveRange(depth + 1, _crumb.Count - depth - 1);
+        int idx = _menus.FindIndex(m => m.Id == id);
+        if (idx < 0) return;
+        _rebuildingList = true; _menuCombo.SelectedIndex = idx; _rebuildingList = false;
+        ShowMenu(idx);
     }
 
-    private void SelectItem(int idx)
+    private void UpdateCrumb()
+    {
+        if (_crumbBar is null) return;
+        _crumbBar.Children.Clear();
+        for (int d = 0; d < _crumb.Count; d++)
+        {
+            int    mi   = _menus.FindIndex(m => m.Id == _crumb[d]);
+            string name = mi >= 0 ? _menus[mi].Name : _crumb[d];
+
+            if (d > 0)
+                _crumbBar.Children.Add(new TextBlock
+                {
+                    Text = "›", Margin = new Thickness(4, 0, 4, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+                });
+
+            if (d == _crumb.Count - 1)
+                _crumbBar.Children.Add(new TextBlock
+                {
+                    Text = name, VerticalAlignment = VerticalAlignment.Center,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                });
+            else
+            {
+                int depth = d;
+                var link = new HyperlinkButton { Content = name, Padding = new Thickness(2, 0, 2, 0) };
+                link.Click += (_, _) => CrumbClickToDepth(depth);
+                _crumbBar.Children.Add(link);
+            }
+        }
+    }
+
+    private void UpdateProfileBadge()
+    {
+        if (_profileBadge?.Child is not TextBlock tb) return;
+        string? menuId = Live?.Id;
+        var apps = menuId is null
+            ? new List<string>()
+            : App.Config.Current.AppProfiles
+                .Where(p => p.MenuId == menuId && !string.IsNullOrWhiteSpace(p.ProcessName))
+                .Select(p => p.ProcessName).ToList();
+        tb.Text = apps.Count > 0
+            ? $"Bound to: {string.Join(", ", apps)}"
+            : "Not bound to any app";
+    }
+
+    // ── Dirty tracking ────────────────────────────────────────────────────
+
+    private void MarkDirty()
+    {
+        if (_dirtyBar is not null) _dirtyBar.Visibility = Visibility.Visible;
+    }
+
+    private void ClearDirty()
+    {
+        if (_dirtyBar is not null) _dirtyBar.Visibility = Visibility.Collapsed;
+    }
+
+    private void Discard(object sender, RoutedEventArgs e)
+    {
+        // Re-clone from the live config, throwing away all working-copy edits.
+        var json = System.Text.Json.JsonSerializer.Serialize(App.Config.Current.Menus);
+        _menus   = System.Text.Json.JsonSerializer.Deserialize<List<RadialMenuConfig>>(json) ?? [];
+        _itemIdx = -1;
+        _editorCard.Visibility = Visibility.Collapsed;
+        PopulateMenuCombo();
+        if (_menus.Count > 0) { _menuCombo.SelectedIndex = 0; SelectMenu(0); }
+        else { _crumb.Clear(); UpdateCrumb(); UpdateProfileBadge(); RefreshItemList(); }
+        ClearDirty();
+    }
+
+    // Gradient color with fallback to a flat fill color when the gradient stop is empty.
+    private static SKColor GradColor(AeroTheme t, string grad, string fallback)
+        => t.ToSKColor(grad.Length > 0 ? grad : fallback);
+
+    private void RefreshItemList() => _ringCanvas?.Invalidate();
+
+    private void SelectSlot(int idx)
     {
         _itemIdx = idx;
-        if (Cur is null) { _editorCard.Visibility = Visibility.Collapsed; return; }
-        _editorCard.Visibility = Visibility.Visible;
-        LoadEditor(Cur);
+        if (Cur is null || Cur.IsEmptySlot)
+        {
+            _itemIdx = -1;
+            _editorCard.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            _editorCard.Visibility = Visibility.Visible;
+            LoadEditor(Cur);
+        }
+        _ringCanvas?.Invalidate();
     }
 
     private void AddMenu(object sender, RoutedEventArgs e)
@@ -1274,6 +1462,7 @@ public sealed partial class MenusPage : Page
         });
         PopulateMenuCombo();
         _menuCombo.SelectedIndex = _menus.Count - 1;
+        MarkDirty();
     }
 
     private async Task RenameMenuAsync()
@@ -1293,6 +1482,8 @@ public sealed partial class MenusPage : Page
             Live.Name = tb.Text.Trim();
             PopulateMenuCombo();
             PopulateSubMenuPicker();
+            UpdateCrumb();
+            MarkDirty();
         }
     }
 
@@ -1313,46 +1504,56 @@ public sealed partial class MenusPage : Page
         _itemIdx = -1;
         _editorCard.Visibility = Visibility.Collapsed;
         PopulateMenuCombo();
+        MarkDirty();
     }
 
     // ── Item management ───────────────────────────────────────────────────
 
-    private void AddItem(object sender, RoutedEventArgs e)
+    private void AddItemAt(int slot)
     {
         if (Live is null) return;
-        Live.Items.Add(new MenuItemConfig { Label = "New item", Icon = "default", ActionType = ActionType.None });
-        RefreshItemList();
-        _itemList.SelectedIndex = Live.Items.Count - 1;
-        _ringCanvas.Invalidate();
+        PutAt(slot, new MenuItemConfig { Label = "New item", Icon = "default", ActionType = ActionType.None });
+        SelectSlot(slot);
+        MarkDirty();
     }
 
     private void RemoveItem(object sender, RoutedEventArgs e)
     {
-        if (Live is null || Cur is null) return;
-        Live.Items.RemoveAt(_itemIdx);
+        if (Live is null || _itemIdx < 0 || _itemIdx >= Live.Items.Count) return;
+        Live.Items[_itemIdx] = NewEmpty();  // leave an empty slot in place — no auto-shift
+        TrimTrailingEmpties();
         _itemIdx = -1;
         _editorCard.Visibility = Visibility.Collapsed;
-        RefreshItemList();
         _ringCanvas.Invalidate();
+        MarkDirty();
     }
 
-    private void MoveUp(object sender, RoutedEventArgs e)
+    // ── Slot helpers (allow empty placeholders at any position, i.e. gaps) ──
+
+    private static MenuItemConfig NewEmpty()
+        => new() { Label = "", Icon = "", ActionType = ActionType.None };
+
+    private void PutAt(int slot, MenuItemConfig item)
     {
-        if (Live is null || _itemIdx <= 0) return;
-        (Live.Items[_itemIdx], Live.Items[_itemIdx - 1]) = (Live.Items[_itemIdx - 1], Live.Items[_itemIdx]);
-        int newIdx = _itemIdx - 1;
-        RefreshItemList();
-        _itemList.SelectedIndex = newIdx;
-        _ringCanvas.Invalidate();
+        if (Live is null) return;
+        while (Live.Items.Count <= slot) Live.Items.Add(NewEmpty());
+        Live.Items[slot] = item;
     }
 
-    private void MoveDown(object sender, RoutedEventArgs e)
+    private void TrimTrailingEmpties()
     {
-        if (Live is null || _itemIdx < 0 || _itemIdx >= Live.Items.Count - 1) return;
-        (Live.Items[_itemIdx], Live.Items[_itemIdx + 1]) = (Live.Items[_itemIdx + 1], Live.Items[_itemIdx]);
-        int newIdx = _itemIdx + 1;
-        RefreshItemList();
-        _itemList.SelectedIndex = newIdx;
+        if (Live is null) return;
+        while (Live.Items.Count > 0 && Live.Items[^1].IsEmptySlot)
+            Live.Items.RemoveAt(Live.Items.Count - 1);
+    }
+
+    private void MoveOrSwap(int src, int dst)
+    {
+        if (Live is null || src == dst) return;
+        int max = Math.Max(src, dst);
+        while (Live.Items.Count <= max) Live.Items.Add(NewEmpty());
+        (Live.Items[src], Live.Items[dst]) = (Live.Items[dst], Live.Items[src]);
+        TrimTrailingEmpties();
         _ringCanvas.Invalidate();
     }
 
@@ -1384,6 +1585,10 @@ public sealed partial class MenusPage : Page
                 if (_subMenuSel.Items[i] is ComboBoxItem ci && ci.Tag as string == item.SubMenuId)
                     { _subMenuSel.SelectedIndex = i; break; }
 
+        _macroSteps = (item.Macro ?? new List<MacroStep>())
+            .Select(m => new MacroStep { Type = m.Type, Value = m.Value, DelayMs = m.DelayMs }).ToList();
+        RebuildMacroRows();
+
         ShowPane(item.ActionType);
     }
 
@@ -1402,6 +1607,91 @@ public sealed partial class MenusPage : Page
         _subPane.Visibility    = at == ActionType.SubMenu        ? Visibility.Visible : Visibility.Collapsed;
         _scriptPane.Visibility = at == ActionType.RunScript      ? Visibility.Visible : Visibility.Collapsed;
         _clipPane.Visibility   = at == ActionType.PasteClipboard ? Visibility.Visible : Visibility.Collapsed;
+        _macroPane.Visibility  = at == ActionType.Macro          ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ── Macro step editor ─────────────────────────────────────────────────
+
+    private static string MacroPlaceholder(MacroStepType t) => t switch
+    {
+        MacroStepType.TypeText => "text to type",
+        MacroStepType.KeyPress => "Enter, Tab, Ctrl+S…",
+        MacroStepType.KeyDown  => "Shift",
+        MacroStepType.KeyUp    => "Shift",
+        MacroStepType.Delay    => "milliseconds",
+        _                      => "",
+    };
+
+    private void RebuildMacroRows()
+    {
+        _macroRows.Children.Clear();
+        if (_macroSteps.Count == 0)
+        {
+            _macroRows.Children.Add(new TextBlock
+            {
+                Text = "No steps yet. Add one below.", FontSize = 12,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            });
+            return;
+        }
+
+        for (int i = 0; i < _macroSteps.Count; i++)
+        {
+            int  idx  = i;
+            var  step = _macroSteps[i];
+            var  row  = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+
+            row.Children.Add(new TextBlock
+            {
+                Text = $"{i + 1}", Width = 18, FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            });
+
+            var typeCombo = new ComboBox { Width = 110 };
+            foreach (var n in MacroStepNames) typeCombo.Items.Add(n);
+            typeCombo.SelectedIndex = (int)step.Type;
+
+            var valueBox = new TextBox
+            {
+                Width           = 150,
+                Text            = step.Type == MacroStepType.Delay ? step.DelayMs.ToString() : step.Value,
+                PlaceholderText = MacroPlaceholder(step.Type),
+            };
+            valueBox.TextChanged += (_, _) =>
+            {
+                if (step.Type == MacroStepType.Delay)
+                {
+                    int.TryParse(valueBox.Text, out int ms);
+                    step.DelayMs = Math.Max(0, ms);
+                }
+                else step.Value = valueBox.Text;
+                MarkDirty();
+            };
+
+            typeCombo.SelectionChanged += (_, _) =>
+            {
+                step.Type = (MacroStepType)typeCombo.SelectedIndex;
+                valueBox.PlaceholderText = MacroPlaceholder(step.Type);
+                valueBox.Text = step.Type == MacroStepType.Delay ? step.DelayMs.ToString() : step.Value;
+                MarkDirty();
+            };
+
+            Button MiniBtn(string t) => new() { Content = t, Width = 32, Padding = new Thickness(0, 2, 0, 2) };
+            var up   = MiniBtn("↑");
+            var down = MiniBtn("↓");
+            var del  = MiniBtn("✕");
+            up.Click   += (_, _) => { if (idx > 0) { (_macroSteps[idx], _macroSteps[idx - 1]) = (_macroSteps[idx - 1], _macroSteps[idx]); RebuildMacroRows(); MarkDirty(); } };
+            down.Click += (_, _) => { if (idx < _macroSteps.Count - 1) { (_macroSteps[idx], _macroSteps[idx + 1]) = (_macroSteps[idx + 1], _macroSteps[idx]); RebuildMacroRows(); MarkDirty(); } };
+            del.Click  += (_, _) => { _macroSteps.RemoveAt(idx); RebuildMacroRows(); MarkDirty(); };
+
+            row.Children.Add(typeCombo);
+            row.Children.Add(valueBox);
+            row.Children.Add(up);
+            row.Children.Add(down);
+            row.Children.Add(del);
+            _macroRows.Children.Add(row);
+        }
     }
 
     private static string? NE(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
@@ -1430,24 +1720,30 @@ public sealed partial class MenusPage : Page
 
             Cur.SubMenuId = at == ActionType.SubMenu && _subMenuSel.SelectedItem is ComboBoxItem ci
                 ? ci.Tag as string : null;
+
+            Cur.Macro = at == ActionType.Macro
+                ? _macroSteps.Select(m => new MacroStep { Type = m.Type, Value = m.Value, DelayMs = m.DelayMs }).ToList()
+                : null;
         }
 
-        // Refresh the display text for this item in the list
-        if (_itemIdx >= 0 && _itemIdx < _itemList.Items.Count
-            && _itemList.Items[_itemIdx] is ListViewItem lvi)
-            lvi.Content = $"{Cur.Label}  [{Cur.ActionType}]";
-
         _ringCanvas?.Invalidate();
+        MarkDirty();
     }
 
     private async void Save(object sender, RoutedEventArgs e)
     {
         if (Cur is not null) ApplyItem(sender, e);
 
+        // Don't persist trailing empty placeholder slots (mid-list gaps are kept on purpose).
+        foreach (var m in _menus)
+            while (m.Items.Count > 0 && m.Items[^1].IsEmptySlot)
+                m.Items.RemoveAt(m.Items.Count - 1);
+
         var json = System.Text.Json.JsonSerializer.Serialize(_menus);
         var copy = System.Text.Json.JsonSerializer.Deserialize<List<RadialMenuConfig>>(json)!;
         await App.Config.UpdateAsync(cfg => cfg.Menus = copy);
 
+        ClearDirty();
         _saved.Visibility = Visibility.Visible;
         await Task.Delay(2000);
         _saved.Visibility = Visibility.Collapsed;
@@ -1467,8 +1763,9 @@ public sealed partial class MenusPage : Page
         float w  = e.Info.Width, h = e.Info.Height;
         float cx = w / 2f, cy = h / 2f;
         float minDim  = Math.Min(w, h);
-        float outerR  = minDim * 0.42f;
-        float innerR  = minDim * 0.18f;
+        float outerR  = minDim * 0.44f;
+        float innerR  = minDim * 0.17f;
+        float iconR   = (outerR + innerR) / 2f;
 
         int sliceCount = Math.Clamp(appear.SliceCount, 4, 12);
         int itemCount  = menu?.Items.Count ?? 0;
@@ -1477,103 +1774,175 @@ public sealed partial class MenusPage : Page
         float sweep    = fullArc - gap;
         float startOff = -90f - fullArc / 2f;
 
-        // Subtle dark background so the ring reads against any window theme
-        using var bgPaint = new SKPaint { IsAntialias = true,
-            Color = SKColors.Black.WithAlpha(60) };
-        canvas.DrawCircle(cx, cy, outerR + 6f, bgPaint);
-
-        using var paint  = new SKPaint { IsAntialias = true };
-        using var tpaint = new SKPaint
-        {
-            IsAntialias = true, TextAlign = SKTextAlign.Center,
-            TextSize    = minDim * 0.065f,
-        };
+        using var fill   = new SKPaint { IsAntialias = true };
+        using var stroke = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke };
+        using var tp     = new SKPaint { IsAntialias = true, TextAlign = SKTextAlign.Center };
 
         for (int i = 0; i < sliceCount; i++)
         {
             bool  sel   = i == _itemIdx;
-            bool  empty = i >= itemCount;
+            bool  empty = i >= itemCount || (menu is not null && menu.Items[i].IsEmptySlot);
             float start = startOff + i * fullArc + gap / 2f;
-            float alphaMul = empty ? 0.30f : 1f;
+            float emptyMul = empty ? 0.32f : 1f;
 
-            // Slice fill
-            SKColor fillC = sel && !empty
-                ? theme.ToSKColor(theme.SliceFillHover)
-                : (theme.SliceGradientOuter.Length > 0
-                    ? theme.ToSKColor(theme.SliceGradientOuter)
-                    : theme.ToSKColor(theme.SliceFill));
-            paint.Style = SKPaintStyle.Fill;
-            paint.Color = fillC.WithAlpha((byte)(fillC.Alpha * alphaMul));
-            using (var path = RingSlicePath(cx, cy, outerR, innerR, start, sweep))
-                canvas.DrawPath(path, paint);
+            // Gradient fill matching the overlay's slice look
+            SKColor innerC, outerC;
+            if (sel && !empty)
+            {
+                innerC = GradColor(theme, theme.SliceGradientInnerHover, theme.SliceFillHover);
+                outerC = GradColor(theme, theme.SliceGradientOuterHover, theme.SliceFillHover);
+            }
+            else
+            {
+                innerC = GradColor(theme, theme.SliceGradientInner, theme.SliceFill);
+                outerC = GradColor(theme, theme.SliceGradientOuter, theme.SliceFill);
+            }
+            byte ia = (byte)(innerC.Alpha * emptyMul), oa = (byte)(outerC.Alpha * emptyMul);
 
-            // Slice border — thicker for selected
-            paint.Style       = SKPaintStyle.Stroke;
-            paint.StrokeWidth = sel ? 2f : 0.8f;
-            var strokeC = sel
-                ? theme.ToSKColor(theme.AccentColor)
-                : theme.ToSKColor(theme.SliceStroke);
-            paint.Color = strokeC.WithAlpha((byte)(strokeC.Alpha * alphaMul));
-            using (var path = RingSlicePath(cx, cy, outerR, innerR, start, sweep))
-                canvas.DrawPath(path, paint);
+            using var path = RingSlicePath(cx, cy, outerR, innerR, start, sweep);
+            float gradPos = Math.Clamp(outerR > 0f ? innerR / outerR : 0f, 0f, 0.95f);
+            using (var shader = SKShader.CreateRadialGradient(
+                new SKPoint(cx, cy), outerR,
+                [innerC.WithAlpha(ia), outerC.WithAlpha(oa)],
+                [gradPos, 1f], SKShaderTileMode.Clamp))
+            {
+                fill.Style  = SKPaintStyle.Fill;
+                fill.Shader = shader;
+                canvas.DrawPath(path, fill);
+                fill.Shader = null;
+            }
 
-            // Label
+            var strokeC = (sel && !empty ? theme.ToSKColor(theme.AccentColor) : theme.ToSKColor(theme.SliceStroke));
+            stroke.Color       = strokeC.WithAlpha((byte)(strokeC.Alpha * emptyMul));
+            stroke.StrokeWidth = sel ? 2f : Math.Max(theme.SliceStrokeWidth, 0.5f);
+            canvas.DrawPath(path, stroke);
+
+            // Drag-target highlight
+            if (_dragging && i == _dragHoverSlice)
+            {
+                stroke.Color       = theme.ToSKColor(theme.AccentColor);
+                stroke.StrokeWidth = 3f;
+                canvas.DrawPath(path, stroke);
+            }
+
+            float mid = startOff + i * fullArc + fullArc / 2f;
+            float rad = mid * MathF.PI / 180f;
+            float ix  = cx + MathF.Cos(rad) * iconR;
+            float iy  = cy + MathF.Sin(rad) * iconR;
+
             if (!empty && menu is not null)
             {
-                var   item   = menu.Items[i];
-                float mid    = startOff + i * fullArc + fullArc / 2f;
-                float rad    = mid * MathF.PI / 180f;
-                float labelR = (outerR + innerR) / 2f;
-                float tx     = cx + MathF.Cos(rad) * labelR;
-                float ty     = cy + MathF.Sin(rad) * labelR;
-                string lbl   = item.Label.Length > 9 ? item.Label[..9] : item.Label;
-                var labelColor = sel ? theme.ToSKColor(theme.LabelColorHover) : theme.ToSKColor(theme.LabelColor);
-                tpaint.Color   = labelColor.WithAlpha((byte)(labelColor.Alpha * alphaMul));
-                canvas.DrawText(lbl, tx, ty + tpaint.TextSize / 3f, tpaint);
+                var bmp = IconRegistry.Get(menu.Items[i].Icon, theme.IconStrokeScale);
+                if (bmp is not null)
+                {
+                    float isz  = minDim * 0.12f;
+                    var   dest = new SKRect(ix - isz / 2, iy - isz / 2, ix + isz / 2, iy + isz / 2);
+                    using var ip = new SKPaint
+                    {
+                        IsAntialias   = true,
+                        FilterQuality = SKFilterQuality.High,
+                        ColorFilter   = SKColorFilter.CreateBlendMode(
+                            theme.ToSKColor(sel ? theme.IconTintHover : theme.IconTint), SKBlendMode.Modulate),
+                    };
+                    canvas.DrawBitmap(bmp, dest, ip);
+                }
+            }
+            else if (empty)
+            {
+                // Empty slot → "+" add affordance
+                tp.Color    = theme.ToSKColor(theme.AccentColor).WithAlpha(90);
+                tp.TextSize = minDim * 0.11f;
+                canvas.DrawText("+", ix, iy + tp.TextSize / 3f, tp);
             }
         }
 
         // Center circle
-        paint.Style = SKPaintStyle.Fill;
-        var cf = theme.ToSKColor(theme.CenterFill);
-        paint.Color = cf.WithAlpha(cf.Alpha);
-        canvas.DrawCircle(cx, cy, innerR, paint);
-        paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = 1f;
-        paint.Color = theme.ToSKColor(theme.CenterStroke);
-        canvas.DrawCircle(cx, cy, innerR, paint);
+        fill.Style  = SKPaintStyle.Fill;
+        fill.Color  = theme.ToSKColor(theme.CenterFill);
+        canvas.DrawCircle(cx, cy, innerR, fill);
+        stroke.Color       = theme.ToSKColor(theme.CenterStroke);
+        stroke.StrokeWidth = 1f;
+        canvas.DrawCircle(cx, cy, innerR, stroke);
 
-        // Small "click to select" hint when nothing is selected
-        if (_itemIdx < 0 && itemCount > 0)
+        // Center label = current menu name
+        if (menu is not null)
         {
-            tpaint.TextSize = minDim * 0.045f;
-            tpaint.Color    = SKColors.White.WithAlpha(60);
-            canvas.DrawText("tap slice to select", cx, cy + tpaint.TextSize / 3f, tpaint);
+            string nm = menu.Name.Length > 10 ? menu.Name[..10] : menu.Name;
+            tp.Color    = theme.ToSKColor(theme.LabelColor).WithAlpha(210);
+            tp.TextSize = minDim * 0.05f;
+            canvas.DrawText(nm, cx, cy + tp.TextSize / 3f, tp);
         }
     }
 
-    private void OnRingClick(object? sender, PointerRoutedEventArgs e)
+    // Returns the slice index under a canvas point, or -1 if outside the ring band.
+    private int HitSlice(Windows.Foundation.Point pos)
     {
-        var pos = e.GetCurrentPoint(_ringCanvas).Position;
         float cx = (float)_ringCanvas.ActualWidth  / 2f;
         float cy = (float)_ringCanvas.ActualHeight / 2f;
         float dx = (float)pos.X - cx, dy = (float)pos.Y - cy;
-        float dist     = MathF.Sqrt(dx*dx + dy*dy);
-        float minDim   = (float)Math.Min(_ringCanvas.ActualWidth, _ringCanvas.ActualHeight);
-        float outerR   = minDim * 0.42f;
-        float innerR   = minDim * 0.18f;
-
-        if (dist < innerR || dist > outerR) return;
+        float dist   = MathF.Sqrt(dx * dx + dy * dy);
+        float minDim = (float)Math.Min(_ringCanvas.ActualWidth, _ringCanvas.ActualHeight);
+        if (dist < minDim * 0.17f || dist > minDim * 0.44f) return -1;
 
         int   sliceCount = Math.Clamp(App.Config.Current.Appearance.SliceCount, 4, 12);
         float fullArc    = 360f / sliceCount;
         float angleDeg   = MathF.Atan2(dy, dx) * 180f / MathF.PI;
         if (angleDeg < 0) angleDeg += 360f;
         float topAlign = (angleDeg + 90f + fullArc / 2f) % 360f;
-        int   sliceIdx = (int)(topAlign / fullArc) % sliceCount;
+        return (int)(topAlign / fullArc) % sliceCount;
+    }
 
-        // Select in the list (which triggers SelectItem + Invalidate)
-        _itemList.SelectedIndex = sliceIdx < (Live?.Items.Count ?? 0) ? sliceIdx : -1;
+    private static bool SlotFilled(RadialMenuConfig? menu, int slot)
+        => menu is not null && slot >= 0 && slot < menu.Items.Count && !menu.Items[slot].IsEmptySlot;
+
+    private void OnRingPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _dragStart      = e.GetCurrentPoint(_ringCanvas).Position;
+        _dragSrcSlice   = HitSlice(_dragStart);
+        _dragHoverSlice = -1;
+        _dragging       = false;
+        if (_dragSrcSlice >= 0) _ringCanvas.CapturePointer(e.Pointer);
+    }
+
+    private void OnRingPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dragSrcSlice < 0) return;
+        var p = e.GetCurrentPoint(_ringCanvas).Position;
+        if (!_dragging)
+        {
+            // Start a drag only once the pointer moves off the source and the source is filled.
+            double move = Math.Abs(p.X - _dragStart.X) + Math.Abs(p.Y - _dragStart.Y);
+            if (move < 6 || !SlotFilled(Live, _dragSrcSlice)) return;
+            _dragging = true;
+        }
+        int hov = HitSlice(p);
+        if (hov != _dragHoverSlice) { _dragHoverSlice = hov; _ringCanvas.Invalidate(); }
+    }
+
+    private void OnRingPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        _ringCanvas.ReleasePointerCapture(e.Pointer);
+        int  src         = _dragSrcSlice;
+        int  hov         = _dragHoverSlice;
+        bool wasDragging = _dragging;
+        _dragSrcSlice = _dragHoverSlice = -1;
+        _dragging = false;
+
+        if (wasDragging && src >= 0 && hov >= 0 && hov != src)
+        {
+            MoveOrSwap(src, hov);
+            SelectSlot(hov);
+            MarkDirty();
+            return;
+        }
+
+        // Not a drag → treat as a click on the pressed slice.
+        int target = HitSlice(e.GetCurrentPoint(_ringCanvas).Position);
+        if (target < 0) target = src;
+        if (target < 0) { _ringCanvas.Invalidate(); return; }
+
+        if (SlotFilled(Live, target)) SelectSlot(target);
+        else                          AddItemAt(target);
     }
 
     private static SKPath RingSlicePath(float cx, float cy,
@@ -1720,6 +2089,7 @@ public sealed partial class MenusPage : Page
         foreach (var item in items) Live.Items.Add(item);
         RefreshItemList();
         _ringCanvas?.Invalidate();
+        MarkDirty();
     }
 
     private async Task SaveAsPresetAsync()
@@ -2878,4 +3248,183 @@ public sealed partial class AdvancedPage : Page
 public sealed partial class AboutPage : Page
 {
     public AboutPage() => Content = AboutContent.Build();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ProfilesPage — per-app menu profiles (context-aware dial)
+// ═══════════════════════════════════════════════════════════════════════════
+
+public sealed partial class ProfilesPage : Page
+{
+    // Working copy — not written to config until Save.
+    private List<AppProfileConfig> _profiles = [];
+    private StackPanel _rows  = null!;
+    private TextBlock   _saved = null!;
+
+    public ProfilesPage() => Build();
+
+    private void Build()
+    {
+        var scroll = new ScrollViewer { Padding = new Thickness(32, 24, 32, 24) };
+        var stack  = new StackPanel { Spacing = 8 };
+
+        stack.Children.Add(UI.PageHeader("App Profiles"));
+        stack.Children.Add(UI.InfoCard(
+            "Assign a menu to an app. When that app is in the foreground and you open the dial, " +
+            "it shows the assigned menu instead of the default. Apps are matched by process name."));
+
+        _profiles = App.Config.Current.AppProfiles
+            .Select(p => new AppProfileConfig { ProcessName = p.ProcessName, MenuId = p.MenuId })
+            .ToList();
+
+        _rows = new StackPanel { Spacing = 6, Margin = new Thickness(0, 4, 0, 4) };
+        stack.Children.Add(_rows);
+        RebuildRows();
+
+        var addBtn = new Button { Content = "Add profile" };
+        addBtn.Click += (_, _) =>
+        {
+            _profiles.Add(new AppProfileConfig { ProcessName = "", MenuId = DefaultMenuId() });
+            RebuildRows();
+        };
+
+        var detectBtn    = new Button { Content = "Add from running app" };
+        var detectFlyout = new MenuFlyout();
+        detectBtn.Flyout = detectFlyout;
+        detectFlyout.Opening += (_, _) => PopulateRunningApps(detectFlyout);
+
+        var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+        btnRow.Children.Add(addBtn);
+        btnRow.Children.Add(detectBtn);
+        stack.Children.Add(btnRow);
+
+        var saveBtn = UI.SaveButton();
+        saveBtn.Margin = new Thickness(0, 16, 0, 0);
+        saveBtn.Click += Save;
+        _saved = UI.SavedBadge();
+        _saved.Margin = new Thickness(0, 16, 0, 0);
+        var saveRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        saveRow.Children.Add(saveBtn);
+        saveRow.Children.Add(_saved);
+        stack.Children.Add(saveRow);
+
+        scroll.Content = stack;
+        Content = scroll;
+    }
+
+    private static string DefaultMenuId()
+        => App.Config.Current.Menus.FirstOrDefault()?.Id ?? "default";
+
+    private void RebuildRows()
+    {
+        _rows.Children.Clear();
+
+        if (_profiles.Count == 0)
+        {
+            _rows.Children.Add(new TextBlock
+            {
+                Text       = "No app profiles yet. Add one below.",
+                FontSize   = 13,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(160, 200, 200, 220)),
+            });
+            return;
+        }
+
+        var menus = App.Config.Current.Menus;
+        foreach (var prof in _profiles)
+        {
+            var row = new StackPanel
+            {
+                Orientation       = Orientation.Horizontal,
+                Spacing           = 8,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+
+            var nameBox = new TextBox
+            {
+                Text            = prof.ProcessName,
+                PlaceholderText = "process name (e.g. acad)",
+                Width           = 220,
+            };
+            nameBox.TextChanged += (_, _) => prof.ProcessName = nameBox.Text.Trim();
+
+            var arrow = new TextBlock { Text = "→", VerticalAlignment = VerticalAlignment.Center, FontSize = 15 };
+
+            var combo = new ComboBox { Width = 200 };
+            int selected = -1;
+            for (int m = 0; m < menus.Count; m++)
+            {
+                combo.Items.Add(new ComboBoxItem { Content = menus[m].Name, Tag = menus[m].Id });
+                if (menus[m].Id == prof.MenuId) selected = m;
+            }
+            combo.SelectedIndex = selected >= 0 ? selected : 0;
+            if (selected < 0 && menus.Count > 0) prof.MenuId = menus[0].Id; // fell back — keep model in sync
+            combo.SelectionChanged += (_, _) =>
+            {
+                if (combo.SelectedItem is ComboBoxItem ci && ci.Tag is string id) prof.MenuId = id;
+            };
+
+            var del = new Button { Content = "✕", Width = 40 };
+            del.Click += (_, _) => { _profiles.Remove(prof); RebuildRows(); };
+
+            row.Children.Add(nameBox);
+            row.Children.Add(arrow);
+            row.Children.Add(combo);
+            row.Children.Add(del);
+            _rows.Children.Add(row);
+        }
+    }
+
+    private void PopulateRunningApps(MenuFlyout flyout)
+    {
+        flyout.Items.Clear();
+        var names = GetRunningAppProcessNames();
+        if (names.Count == 0)
+        {
+            flyout.Items.Add(new MenuFlyoutItem { Text = "No running apps found", IsEnabled = false });
+            return;
+        }
+        foreach (var name in names)
+        {
+            var mi = new MenuFlyoutItem { Text = name };
+            mi.Click += (_, _) =>
+            {
+                if (!_profiles.Any(p => string.Equals(p.ProcessName, name, StringComparison.OrdinalIgnoreCase)))
+                    _profiles.Add(new AppProfileConfig { ProcessName = name, MenuId = DefaultMenuId() });
+                RebuildRows();
+            };
+            flyout.Items.Add(mi);
+        }
+    }
+
+    // Running processes that own a visible top-level window, by process name.
+    private static List<string> GetRunningAppProcessNames()
+    {
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in System.Diagnostics.Process.GetProcesses())
+        {
+            try
+            {
+                if (p.MainWindowHandle != IntPtr.Zero && !string.IsNullOrEmpty(p.MainWindowTitle))
+                    names.Add(p.ProcessName);
+            }
+            catch { /* protected/elevated process — skip */ }
+            finally { p.Dispose(); }
+        }
+        names.Remove(AppConstants.AppName); // don't offer AeroDial itself
+        return names.ToList();
+    }
+
+    private async void Save(object s, RoutedEventArgs e)
+    {
+        var cleaned = _profiles
+            .Where(p => !string.IsNullOrWhiteSpace(p.ProcessName))
+            .Select(p => new AppProfileConfig { ProcessName = p.ProcessName.Trim(), MenuId = p.MenuId })
+            .ToList();
+
+        await App.Config.UpdateAsync(cfg => cfg.AppProfiles = cleaned);
+        _saved.Visibility = Visibility.Visible;
+        await Task.Delay(2000);
+        _saved.Visibility = Visibility.Collapsed;
+    }
 }

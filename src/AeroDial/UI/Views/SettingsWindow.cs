@@ -33,20 +33,20 @@ public sealed class SettingsWindow : Window
 
     public static void ShowOrActivate()
     {
-        if (_instance is not null)
+        if (_instance is null)
         {
-            // SW_RESTORE un-hides a hidden window AND un-minimizes a minimized window.
-            // Handles both "X pressed → hidden" and "─ pressed → minimized" in one call.
-            Win32.ShowWindow(WindowHandle, Win32.SW_RESTORE);
-            _instance.Activate();
-            // SetForegroundWindow ensures the window actually receives focus even when
-            // called from a non-foreground context (e.g. tray icon double-click).
-            Win32.SetForegroundWindow(WindowHandle);
-            return;
+            _instance = new SettingsWindow();
+            _instance.Closed += (_, _) => _instance = null;
         }
-        _instance = new SettingsWindow();
-        _instance.Closed += (_, _) => _instance = null;
+
+        // Always run the full show sequence, including on first open. From the tray
+        // thread a bare Activate() can leave the window minimized / behind, so:
+        //  - Activate() shows the WinUI window,
+        //  - SW_RESTORE un-hides (X pressed) AND un-minimizes (─ pressed),
+        //  - SetForegroundWindow pulls it to the front from a non-foreground caller.
         _instance.Activate();
+        Win32.ShowWindow(WindowHandle, Win32.SW_RESTORE);
+        Win32.SetForegroundWindow(WindowHandle);
     }
 
     // ── Constructor ───────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ public sealed class SettingsWindow : Window
         });
         brandText.Children.Add(new TextBlock
         {
-            Text       = "v1.0.0",
+            Text       = $"v{AppConstants.Version}",
             FontSize   = 11,
             Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
         });
@@ -113,6 +113,7 @@ public sealed class SettingsWindow : Window
             ("behavior",     "Behavior"),
             ("dynamic",      "Dynamic"),
             ("menus",        "Menus"),
+            ("profiles",     "App Profiles"),
             ("themes",       "Themes"),
             ("theme_editor", "Theme Editor"),
             ("advanced",     "Advanced"),
@@ -186,6 +187,7 @@ public sealed class SettingsWindow : Window
             "behavior"     => new BehaviorPage(),
             "dynamic"      => new DynamicPage(),
             "menus"        => new MenusPage(),
+            "profiles"     => new ProfilesPage(),
             "themes"       => new ThemesPage(),
             "theme_editor" => new ThemeEditorPage(),
             "advanced"     => new AdvancedPage(),
@@ -270,7 +272,7 @@ public sealed class SettingsWindow : Window
 
     private void ConfigureChrome()
     {
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(820, 560));
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(900, 680));
         AppWindow.IsShownInSwitchers = true;
 
         var iconPath = Path.Combine(
@@ -286,8 +288,8 @@ public sealed class SettingsWindow : Window
         }
 
         var display = DisplayArea.Primary;
-        int x = (display.WorkArea.Width  - 820) / 2;
-        int y = (display.WorkArea.Height - 560) / 2;
+        int x = (display.WorkArea.Width  - 900) / 2;
+        int y = (display.WorkArea.Height - 680) / 2;
         AppWindow.Move(new Windows.Graphics.PointInt32(x, y));
     }
 }

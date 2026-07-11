@@ -21,6 +21,7 @@ public partial class App : Application
     internal static TrayService       Tray       { get; private set; } = null!;
     internal static HookService       Hooks      { get; private set; } = null!;
     internal static OverlayController Overlay    { get; private set; } = null!;
+    internal static MediaInfoService? MediaInfo  { get; private set; }
 
     public App()
     {
@@ -48,6 +49,8 @@ public partial class App : Application
                 Logger.SetDebugMode(Config.Current.Behavior.EnableDebugLogging);
                 Logger.Info($"Config loaded. Debug logging: {Config.Current.Behavior.EnableDebugLogging}");
                 Themes     = new ThemeService();
+                MediaInfo  = new MediaInfoService();
+                MediaInfo.Start();  // async, event-driven now-playing (safe if it fails)
                 Dispatcher = new ActionDispatcher();
                 Tray       = new TrayService();
                 Tray.Initialize();
@@ -80,6 +83,7 @@ public partial class App : Application
         Hooks?.Stop();
         Tray?.Dispose();
         Overlay?.Dispose();
+        MediaInfo?.Dispose();
         Current.Exit();
     }
 }

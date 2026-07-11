@@ -1,7 +1,8 @@
 // AeroDial — BuiltInThemes.cs
-// The twelve built-in preset themes, defined in code so they're always available
+// The eleven built-in preset themes, defined in code so they're always available
 // even if the /themes folder is missing. These serve as the definitive reference
 // for what a well-formed theme looks like.
+// (Note: a Frost theme is also defined below but intentionally left out of All.)
 //
 // All themes support the gradient ring:
 //   SliceGradientInner  = color at inner radius (darker, toward centre)
@@ -146,7 +147,7 @@ internal static class BuiltInThemes
 
         SliceFill         = "#E60D2224",
         SliceFillHover    = "#E6102A2C",
-        SliceStroke       = "#161D6040",
+        SliceStroke       = "#1E0C2018",
         SliceStrokeHover  = "#CC1D9E75",
         SliceStrokeWidth  = 0.8f,
 
@@ -181,7 +182,7 @@ internal static class BuiltInThemes
 
         SliceFill         = "#EEF0EDE8",
         SliceFillHover    = "#EEE2DDD5",
-        SliceStroke       = "#33000000",
+        SliceStroke       = "#33B8B0A2",
         SliceStrokeHover  = "#774A4A4A",
         SliceStrokeWidth  = 0.7f,
 
@@ -290,7 +291,7 @@ internal static class BuiltInThemes
 
         SliceFill         = "#E00A1628",
         SliceFillHover    = "#4D00C8FF",
-        SliceStroke       = "#4D288CC8",
+        SliceStroke       = "#200A1626",
         SliceStrokeHover  = "#CC00C8FF",
         SliceStrokeWidth  = 0.8f,
 
@@ -394,7 +395,7 @@ internal static class BuiltInThemes
 
         SliceFill         = "#D9DCE8F4",
         SliceFillHover    = "#4D40A0E0",
-        SliceStroke       = "#333C78B4",
+        SliceStroke       = "#3396A8BE",
         SliceStrokeHover  = "#CC40A0E0",
         SliceStrokeWidth  = 0.7f,
 

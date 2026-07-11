@@ -96,6 +96,8 @@ internal sealed class HookService : IDisposable
     private static extern bool PostThreadMessage(uint idThread, uint msg, nint wParam, nint lParam);
 
     private const uint WM_QUIT = 0x0012;
+    // App-defined thread message used to marshal a hook reinstall onto the hook thread.
+    private const uint WM_REINSTALL_HOOKS = 0x8000 + 1; // WM_APP + 1
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MSG
@@ -150,7 +152,18 @@ internal sealed class HookService : IDisposable
 
     private void Reinstall()
     {
-        // Unhook — new hooks will be installed on next thread spin
+        // Low-level hooks must be installed and serviced on the thread that owns the
+        // message pump. ConfigChanged fires on the UI thread, so marshal the actual
+        // unhook/rehook onto the hook thread via a posted thread message instead of
+        // calling Set/UnhookWindowsHookEx from the wrong thread.
+        uint tid = _hookThreadId;
+        if (tid != 0) PostThreadMessage(tid, WM_REINSTALL_HOOKS, 0, 0);
+    }
+
+    // Runs on the hook thread (dispatched from the message pump) so the new hooks
+    // are owned by the correct thread and serviced by its GetMessage loop.
+    private void DoReinstall()
+    {
         if (_mouseHook != 0) { UnhookWindowsHookEx(_mouseHook); _mouseHook = 0; }
         if (_keyHook   != 0) { UnhookWindowsHookEx(_keyHook);   _keyHook   = 0; }
         InstallHooks();
@@ -168,6 +181,11 @@ internal sealed class HookService : IDisposable
         // to unblock it so this thread exits promptly.
         while (_running && GetMessage(out var msg, 0, 0, 0) > 0)
         {
+            if (msg.message == WM_REINSTALL_HOOKS)
+            {
+                DoReinstall();
+                continue;
+            }
             TranslateMessage(ref msg);
             DispatchMessage(ref msg);
         }

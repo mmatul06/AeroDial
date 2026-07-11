@@ -173,6 +173,25 @@ internal static class IconRegistry
     // ── Built-in programmatic icons ───────────────────────────────────────
     // All drawn white at size×size; renderer applies tint ColorFilter at draw time.
 
+    // The full set of built-in vector icon names (drawn white, then tinted at render time).
+    // Keep in sync with the DrawBuiltIn switch below. Used by IsBuiltIn so the renderer knows
+    // which icons are safe to recolor vs. which are full-color exe/image icons to leave as-is.
+    private static readonly HashSet<string> s_builtInNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "media", "apps", "vol_up", "vol_down", "mute", "play", "settings", "desktop",
+        "next", "prev", "url", "script", "clipboard", "default",
+        "power", "lock", "folder", "copy", "paste", "home", "search", "mic",
+        "close", "camera", "keyboard", "refresh", "send", "star",
+        "pause", "stop", "back", "forward", "minimize", "zoom_in", "zoom_out",
+        "trash", "edit", "download", "upload", "check", "plus", "minus",
+        "tag", "share", "list", "info", "wifi", "bluetooth", "brightness",
+        "clock", "alarm", "calendar", "sleep", "screenshot",
+    };
+
+    /// <summary>True if the key names a built-in white vector icon (tintable), false for
+    /// full-color exe/image icons which should render in their natural colors.</summary>
+    public static bool IsBuiltIn(string? key) => key is not null && s_builtInNames.Contains(key);
+
     private static SKBitmap? DrawBuiltIn(string key, int size, float strokeScale = 1f)
     {
         Action<SKCanvas, float>? draw = key.ToLowerInvariant() switch

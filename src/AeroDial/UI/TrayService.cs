@@ -41,6 +41,10 @@ internal sealed class TrayService : IDisposable
         Logger.Info("TrayService initialized.");
     }
 
+    /// <summary>Show a tray balloon notification (used to surface action failures to the user).</summary>
+    public void ShowBalloon(string title, string message)
+        => _trayWindow?.ShowBalloon(title, message);
+
     public void Dispose()
     {
         _trayWindow?.Destroy();
@@ -55,11 +59,15 @@ internal sealed class TrayWindow
     // ── Constants ─────────────────────────────────────────────────────────
     private const uint WM_USER_TRAY   = 0x0401;
     private const uint NIM_ADD        = 0;
+    private const uint NIM_MODIFY     = 1;
     private const uint NIM_DELETE     = 2;
     private const uint NIM_SETVERSION = 4;
     private const uint NIF_MESSAGE    = 1;
     private const uint NIF_ICON       = 2;
     private const uint NIF_TIP        = 4;
+    private const uint NIF_SHOWTIP    = 0x80;
+    private const uint NIF_INFO       = 0x10;
+    private const uint NIIF_WARNING   = 0x02;
     private const uint NOTIFYICON_VERSION_4 = 4;
     private const int  WM_DESTROY     = 0x0002;
     private const int  WM_COMMAND     = 0x0111;
@@ -180,12 +188,27 @@ internal sealed class TrayWindow
         if (_hIcon != 0) DestroyIcon(_hIcon);
     }
 
+    // Balloon notification. Identified by hWnd+uID, so this is safe to call from
+    // any thread — the shell delivers it and routes clicks back to _hwnd's WndProc.
+    public void ShowBalloon(string title, string message)
+    {
+        if (_hwnd == 0) return;
+        var nid = MakeNID();
+        nid.uFlags      = NIF_INFO;
+        nid.szInfoTitle = title.Length   > 63  ? title[..63]    : title;
+        nid.szInfo      = message.Length > 255 ? message[..255] : message;
+        nid.dwInfoFlags = NIIF_WARNING;
+        Shell_NotifyIcon(NIM_MODIFY, ref nid);
+    }
+
     private NOTIFYICONDATA MakeNID() => new()
     {
         cbSize           = (uint)Marshal.SizeOf<NOTIFYICONDATA>(),
         hWnd             = _hwnd,
         uID              = 1,
-        uFlags           = NIF_MESSAGE | NIF_ICON | NIF_TIP,
+        // NIF_SHOWTIP: with NOTIFYICON_VERSION_4 the standard tooltip is suppressed
+        // unless this flag is set — without it, hovering the icon shows nothing.
+        uFlags           = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP,
         uCallbackMessage = WM_USER_TRAY,
         hIcon            = _hIcon,
         szTip            = AppConstants.AppName,
