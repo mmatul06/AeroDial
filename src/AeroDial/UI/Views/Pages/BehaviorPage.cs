@@ -31,7 +31,7 @@ public sealed partial class BehaviorPage : Page
     private StackPanel   _dwellRow = null!;
 
     // Always-visible controls
-    private ToggleSwitch _close = null!, _startup = null!, _closeOutside = null!;
+    private ToggleSwitch _close = null!, _startup = null!, _closeOutside = null!, _tapThrough = null!, _keyboardNav = null!;
     private TextBlock    _saved = null!;
     private DispatcherTimer? _saveTimer;
 
@@ -116,6 +116,32 @@ public sealed partial class BehaviorPage : Page
                     ? Visibility.Visible : Visibility.Collapsed;
         }
 
+        // ── Trigger button ────────────────────────────────────────────────
+        bool mouseTrigger = App.Config.Current.Trigger.VirtualKey is >= 0x01 and <= 0x06;
+        stack.Children.Add(PageKit.SubHeader("Trigger button"));
+        _tapThrough = new ToggleSwitch
+        {
+            Header     = "Quick tap passes the click to the app",
+            IsOn       = cfg.TapThrough,
+            OnContent  = $"On: hold to open the dial, tap (under {cfg.TapThresholdMs} ms) to click normally",
+            OffContent = "Off: the trigger button never reaches other apps",
+            IsEnabled  = mouseTrigger && holdMode,
+        };
+        stack.Children.Add(_tapThrough);
+        if (!(mouseTrigger && holdMode))
+            stack.Children.Add(Ui.Hint("Tap-through applies to mouse-button triggers in Hold mode.", 12));
+
+        // ── Keyboard ──────────────────────────────────────────────────────
+        stack.Children.Add(PageKit.SubHeader("Keyboard"));
+        _keyboardNav = new ToggleSwitch
+        {
+            Header     = "Keyboard navigation while the dial is open",
+            IsOn       = cfg.KeyboardNavigation,
+            OnContent  = "On: arrows move, 1-9 pick a slice, Enter runs, Backspace goes back, Esc closes",
+            OffContent = "Off",
+        };
+        stack.Children.Add(_keyboardNav);
+
         // ── After executing ───────────────────────────────────────────────
         stack.Children.Add(PageKit.SubHeader("After executing"));
         _close = new ToggleSwitch
@@ -196,6 +222,8 @@ public sealed partial class BehaviorPage : Page
         _close.Toggled          += (_, _) => ScheduleSave();
         _closeOutside.Toggled   += (_, _) => ScheduleSave();
         _startup.Toggled        += (_, _) => ScheduleSave();
+        _tapThrough.Toggled     += (_, _) => ScheduleSave();
+        _keyboardNav.Toggled    += (_, _) => ScheduleSave();
 
         _saved = PageKit.SavedBadge();
         _saved.Margin = new Thickness(0, 6, 0, 0);
@@ -228,6 +256,8 @@ public sealed partial class BehaviorPage : Page
             cfg.Behavior.CloseOnActionExecuted = _close.IsOn;
             cfg.Behavior.CloseOnClickOutside   = _closeOutside.IsOn;
             cfg.Behavior.StartWithWindows      = _startup.IsOn;
+            cfg.Behavior.TapThrough            = _tapThrough.IsOn;
+            cfg.Behavior.KeyboardNavigation    = _keyboardNav.IsOn;
         });
         ApplyStartup(App.Config.Current.Behavior.StartWithWindows);
         _saved.Visibility = Visibility.Visible;

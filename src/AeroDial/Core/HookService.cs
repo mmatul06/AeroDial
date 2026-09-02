@@ -3,6 +3,12 @@
 // Runs the hook on a dedicated STA thread with its own message pump so it
 // never blocks the UI thread or the render thread.
 // This replaces H.Hooks entirely — more stable, zero third-party dependency.
+//
+// Responsibilities:
+//   - trigger detection (mouse button or key), with tap-through for mouse triggers
+//   - scroll-wheel capture and optional input blocking while the overlay is open
+//   - keyboard navigation keys while the overlay is open (swallowed, forwarded as events)
+//   - Paused: everything passes through untouched
 
 using System.Runtime.InteropServices;
 using AeroDial.Config;
@@ -12,12 +18,15 @@ namespace AeroDial;
 
 internal sealed class HookService : IDisposable
 {
-    // ── Events ────────────────────────────────────────────────────────────
+    // ── Events (raised on threadpool threads) ─────────────────────────────
     public event Action<System.Drawing.Point>? TriggerActivated;
     public event Action?                        TriggerReleased;
     /// <summary>Fires when the mouse wheel is scrolled while the overlay is open.
     /// Positive delta = scroll up, negative = scroll down.</summary>
     public event Action<int>?                   ScrollWheeled;
+    /// <summary>A navigation key (arrows, digits, Enter, Backspace, Escape) was pressed
+    /// while the overlay was open. The key never reaches the app underneath.</summary>
+    public event Action<int>?                   NavKeyPressed;
 
     // ── State ─────────────────────────────────────────────────────────────
     private Thread?       _hookThread;
@@ -26,9 +35,27 @@ internal sealed class HookService : IDisposable
     private volatile uint _hookThreadId;   // Win32 thread ID — needed for PostThreadMessage
     private volatile bool _triggerHeld;
     private volatile bool _running;
-    /// <summary>Set to true by OverlayController while the overlay window is visible.
-    /// Used to gate scroll-wheel interception.</summary>
-    public volatile bool  OverlayOpen;
+
+    /// <summary>Set to true by OverlayController while the overlay window is visible.</summary>
+    public volatile bool OverlayOpen;
+
+    /// <summary>When true the hooks pass everything through (tray "Pause AeroDial").</summary>
+    public volatile bool Paused;
+
+    /// <summary>Optional gate consulted before a trigger opens the dial. Return false to let
+    /// the button/key pass through untouched (e.g. an app profile disables the dial).</summary>
+    public Func<bool>? TriggerGate;
+
+    // Tap-through: a mouse trigger press is held back for TapThresholdMs. If released
+    // before that (and without moving), it was a click meant for the app: replay it.
+    private int    _pendingTap;             // 1 while a press is being held back (Interlocked)
+    private Win32.POINT _pendingPt;
+    private uint   _pendingMouseData;
+    private Timer? _tapTimer;
+    private const int TapMoveTolerancePx = 6;
+
+    // Marker on injected input so the hook does not treat its own replayed clicks as triggers.
+    private static readonly nint InjectedMarker = unchecked((nint)0x0AE20D1A1L);
 
     // Keep delegates alive — GC will collect them otherwise and crash.
     private LowLevelProc? _mouseProc;
@@ -43,6 +70,7 @@ internal sealed class HookService : IDisposable
     private const int WM_KEYUP       = 0x0101;
     private const int WM_SYSKEYDOWN  = 0x0104;
     private const int WM_SYSKEYUP    = 0x0105;
+    private const int WM_MOUSEMOVE   = 0x0200;
     private const int WM_MOUSEWHEEL  = 0x020A;
     private const int WM_LBUTTONDOWN = 0x0201;
     private const int WM_LBUTTONUP   = 0x0202;
@@ -66,6 +94,22 @@ internal sealed class HookService : IDisposable
         public Win32.POINT pt;
         public uint mouseData, flags, time;
         public nint dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int  dx, dy;
+        public uint mouseData, dwFlags, time;
+        public nint dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT_MOUSE
+    {
+        public uint type;       // INPUT_MOUSE = 0
+        public MOUSEINPUT mi;
+        // pad to the size of the INPUT union (KEYBDINPUT/HARDWAREINPUT are smaller than MOUSEINPUT on x64)
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -94,6 +138,9 @@ internal sealed class HookService : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool PostThreadMessage(uint idThread, uint msg, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint nInputs, INPUT_MOUSE[] pInputs, int cbSize);
 
     private const uint WM_QUIT = 0x0012;
     // App-defined thread message used to marshal a hook reinstall onto the hook thread.
@@ -140,6 +187,7 @@ internal sealed class HookService : IDisposable
         if (!_running) return;
         _running = false;
         App.Config.ConfigChanged -= Reinstall;
+        CancelTapTimer();
 
         // Post WM_QUIT to unblock GetMessage on the hook thread so it can
         // exit cleanly. Without this it blocks indefinitely, accumulating
@@ -149,6 +197,9 @@ internal sealed class HookService : IDisposable
 
         Logger.Info("HookService stopped.");
     }
+
+    /// <summary>Self-test hook: behaves as if a navigation key was pressed while open.</summary>
+    internal void SimulateNavKey(int vk) => NavKeyPressed?.Invoke(vk);
 
     private void Reinstall()
     {
@@ -197,37 +248,36 @@ internal sealed class HookService : IDisposable
 
     private void InstallHooks()
     {
-        var cfg    = App.Config.Current.Trigger;
-        var hMod   = GetModuleHandle(null);
-        bool isMouse = cfg.VirtualKey is >= 0x01 and <= 0x06;
+        var hMod = GetModuleHandle(null);
 
-        // Always install the mouse hook: handles mouse-button trigger AND scroll-wheel
-        // interception when the overlay is open (regardless of trigger type).
+        // Both hooks are always installed: the mouse hook handles mouse-button triggers,
+        // scroll-wheel capture and input blocking; the keyboard hook handles keyboard
+        // triggers and the navigation keys while the overlay is open.
         _mouseProc = MouseHookCallback;
         _mouseHook = SetWindowsHookEx(WH_MOUSE_LL, _mouseProc, hMod, 0);
         if (_mouseHook == 0)
             Logger.Error($"Failed to install mouse hook. Error: {Marshal.GetLastWin32Error()}");
 
-        // Install keyboard hook only when the trigger is a keyboard key.
-        if (!isMouse)
-        {
-            _keyProc = KeyboardHookCallback;
-            _keyHook = SetWindowsHookEx(WH_KEYBOARD_LL, _keyProc, hMod, 0);
-            if (_keyHook == 0)
-                Logger.Error($"Failed to install keyboard hook. Error: {Marshal.GetLastWin32Error()}");
-        }
+        _keyProc = KeyboardHookCallback;
+        _keyHook = SetWindowsHookEx(WH_KEYBOARD_LL, _keyProc, hMod, 0);
+        if (_keyHook == 0)
+            Logger.Error($"Failed to install keyboard hook. Error: {Marshal.GetLastWin32Error()}");
     }
 
     // ── Mouse hook callback ───────────────────────────────────────────────
 
     private nint MouseHookCallback(int nCode, nint wParam, nint lParam)
     {
-        if (nCode >= 0)
+        if (nCode >= 0 && !Paused)
         {
             var trigCfg  = App.Config.Current.Trigger;
             var info     = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
             int msg      = (int)wParam;
             bool isMouse = trigCfg.VirtualKey is >= 0x01 and <= 0x06;
+
+            // Our own replayed clicks (tap-through) must pass straight through.
+            if (info.dwExtraInfo == InjectedMarker)
+                return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
 
             // ── Trigger detection (mouse-button triggers only) ───────────
             if (isMouse)
@@ -235,19 +285,53 @@ internal sealed class HookService : IDisposable
                 bool isDown = IsMouseDown(msg, trigCfg.VirtualKey, info.mouseData);
                 bool isUp   = IsMouseUp(msg, trigCfg.VirtualKey, info.mouseData);
 
-                if (isDown && !_triggerHeld && ModifiersMatch(trigCfg))
+                if (isDown && !_triggerHeld && _pendingTap == 0 && ModifiersMatch(trigCfg))
                 {
-                    _triggerHeld = true;
-                    var pt = new System.Drawing.Point(info.pt.X, info.pt.Y);
-                    Task.Run(() => TriggerActivated?.Invoke(pt));
-                    return new nint(1); // always suppress — user chose this as trigger, never pass through
+                    if (TriggerGate is { } gate && !gate())
+                        return CallNextHookEx(_mouseHook, nCode, wParam, lParam); // dial disabled here
+
+                    var bCfg = App.Config.Current.Behavior;
+                    bool tapThrough = bCfg.TapThrough && trigCfg.HoldMode && !OverlayOpen;
+                    if (tapThrough)
+                    {
+                        // Hold the press back; the timer (or a movement) turns it into a trigger,
+                        // a quick release turns it into a replayed click.
+                        _pendingPt        = info.pt;
+                        _pendingMouseData = info.mouseData;
+                        Interlocked.Exchange(ref _pendingTap, 1);
+                        StartTapTimer(Math.Clamp(bCfg.TapThresholdMs, 30, 1000));
+                    }
+                    else
+                    {
+                        _triggerHeld = true;
+                        var pt = new System.Drawing.Point(info.pt.X, info.pt.Y);
+                        Task.Run(() => TriggerActivated?.Invoke(pt));
+                    }
+                    return new nint(1); // suppress: the app never sees the trigger press
                 }
-                else if (isUp && _triggerHeld)
+
+                if (isUp && Interlocked.Exchange(ref _pendingTap, 0) == 1)
+                {
+                    // Released before the threshold: it was a click. Give it back to the app.
+                    CancelTapTimer();
+                    ReplayClick(trigCfg.VirtualKey, _pendingMouseData);
+                    return new nint(1);
+                }
+
+                if (isUp && _triggerHeld)
                 {
                     _triggerHeld = false;
                     if (trigCfg.HoldMode)
                         Task.Run(() => TriggerReleased?.Invoke());
                     return new nint(1); // always suppress trigger-up too
+                }
+
+                if (msg == WM_MOUSEMOVE && _pendingTap == 1)
+                {
+                    // Dragging with the button held: not a tap, open the dial now.
+                    if (Math.Abs(info.pt.X - _pendingPt.X) > TapMoveTolerancePx ||
+                        Math.Abs(info.pt.Y - _pendingPt.Y) > TapMoveTolerancePx)
+                        PromotePendingTap();
                 }
             }
 
@@ -276,22 +360,73 @@ internal sealed class HookService : IDisposable
         return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
 
+    // ── Tap-through helpers ───────────────────────────────────────────────
+
+    private void StartTapTimer(int ms)
+    {
+        CancelTapTimer();
+        _tapTimer = new Timer(_ => PromotePendingTap(), null, ms, Timeout.Infinite);
+    }
+
+    private void CancelTapTimer()
+    {
+        var t = _tapTimer;
+        _tapTimer = null;
+        t?.Dispose();
+    }
+
+    /// <summary>The held-back press is a real trigger: open the dial at the press position.</summary>
+    private void PromotePendingTap()
+    {
+        if (Interlocked.Exchange(ref _pendingTap, 0) != 1) return;
+        CancelTapTimer();
+        _triggerHeld = true;
+        var pt = new System.Drawing.Point(_pendingPt.X, _pendingPt.Y);
+        Task.Run(() => TriggerActivated?.Invoke(pt));
+    }
+
+    /// <summary>Injects a down+up for the trigger button, tagged so this hook ignores it.</summary>
+    private static void ReplayClick(int vk, uint mouseData)
+    {
+        (uint down, uint up, uint data) = vk switch
+        {
+            0x01 => (0x0002u, 0x0004u, 0u),               // MOUSEEVENTF_LEFTDOWN / LEFTUP
+            0x02 => (0x0008u, 0x0010u, 0u),               // RIGHTDOWN / RIGHTUP
+            0x04 => (0x0020u, 0x0040u, 0u),               // MIDDLEDOWN / MIDDLEUP
+            0x05 => (0x0080u, 0x0100u, 1u),               // XDOWN / XUP, XBUTTON1
+            0x06 => (0x0080u, 0x0100u, 2u),               // XDOWN / XUP, XBUTTON2
+            _    => (0u, 0u, 0u),
+        };
+        if (down == 0) return;
+
+        var inputs = new[]
+        {
+            new INPUT_MOUSE { type = 0, mi = new MOUSEINPUT { dwFlags = down, mouseData = data, dwExtraInfo = InjectedMarker } },
+            new INPUT_MOUSE { type = 0, mi = new MOUSEINPUT { dwFlags = up,   mouseData = data, dwExtraInfo = InjectedMarker } },
+        };
+        // The INPUT union is 40 bytes on x64 (type + MOUSEINPUT is the largest member).
+        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT_MOUSE>());
+    }
+
     // ── Keyboard hook callback ────────────────────────────────────────────
 
     private nint KeyboardHookCallback(int nCode, nint wParam, nint lParam)
     {
-        if (nCode >= 0)
+        if (nCode >= 0 && !Paused)
         {
             var cfg  = App.Config.Current.Trigger;
             var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
             int msg  = (int)wParam;
+            int vk   = (int)info.vkCode;
             bool isDown = msg is WM_KEYDOWN or WM_SYSKEYDOWN;
             bool isUp   = msg is WM_KEYUP   or WM_SYSKEYUP;
 
-            if ((int)info.vkCode == cfg.VirtualKey)
+            if (vk == cfg.VirtualKey)
             {
                 if (isDown && !_triggerHeld && ModifiersMatch(cfg))
                 {
+                    if (TriggerGate is { } gate && !gate())
+                        return CallNextHookEx(_keyHook, nCode, wParam, lParam);
                     _triggerHeld = true;
                     Win32.GetCursorPos(out var pt);
                     var point = new System.Drawing.Point(pt.X, pt.Y);
@@ -305,9 +440,23 @@ internal sealed class HookService : IDisposable
                     return new nint(1); // suppress
                 }
             }
+
+            // Navigation keys while the dial is open: swallow (so Esc/Enter never reach the
+            // app underneath) and forward key-downs.
+            if (OverlayOpen && App.Config.Current.Behavior.KeyboardNavigation && IsNavKey(vk))
+            {
+                if (isDown) { int k = vk; Task.Run(() => NavKeyPressed?.Invoke(k)); }
+                return new nint(1);
+            }
         }
         return CallNextHookEx(_keyHook, nCode, wParam, lParam);
     }
+
+    /// <summary>Arrows, Enter, Escape, Backspace, digits 1-9 (top row and numpad).</summary>
+    public static bool IsNavKey(int vk)
+        => vk is 0x25 or 0x26 or 0x27 or 0x28 or 0x0D or 0x1B or 0x08
+        || vk is >= 0x31 and <= 0x39
+        || vk is >= 0x61 and <= 0x69;
 
     // ── Helpers ───────────────────────────────────────────────────────────
 

@@ -110,6 +110,15 @@ public sealed class BehaviorConfig
     public bool CloseOnClickOutside          { get; set; } = true;
     /// <summary>When true, verbose DEBUG entries are written to the log file.</summary>
     public bool EnableDebugLogging           { get; set; } = false;
+
+    /// <summary>Mouse-button triggers in Hold mode: a quick tap (released within
+    /// TapThresholdMs without moving) is replayed to the app as a normal click instead of
+    /// opening the dial, so middle-click / back / forward keep working in browsers.</summary>
+    public bool TapThrough                   { get; set; } = true;
+    public int  TapThresholdMs               { get; set; } = 150;
+
+    /// <summary>Arrow keys, digits, Enter, Backspace and Escape drive the dial while it is open.</summary>
+    public bool KeyboardNavigation           { get; set; } = true;
 }
 
 // ── Menu / Items ──────────────────────────────────────────────────────────────

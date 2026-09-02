@@ -45,6 +45,15 @@ internal sealed class TrayService : IDisposable
     public void ShowBalloon(string title, string message)
         => _trayWindow?.ShowBalloon(title, message);
 
+    /// <summary>Pauses or resumes the dial: hooks pass everything through while paused.</summary>
+    public void SetPaused(bool paused)
+    {
+        App.Hooks.Paused = paused;
+        if (paused) DispatcherQueue.TryEnqueue(() => App.Overlay.Close());
+        _trayWindow?.SetTooltip(paused ? $"{AppConstants.AppName} (paused)" : AppConstants.AppName);
+        Logger.Info(paused ? "AeroDial paused." : "AeroDial resumed.");
+    }
+
     public void Dispose()
     {
         _trayWindow?.Destroy();
@@ -76,6 +85,11 @@ internal sealed class TrayWindow
     private const int  IDM_SETTINGS   = 1001;
     private const int  IDM_ABOUT      = 1002;
     private const int  IDM_QUIT       = 1003;
+    private const int  IDM_PAUSE      = 1004;
+    private const uint MF_STRING      = 0x0000;
+    private const uint MF_SEPARATOR   = 0x0800;
+    private const uint MF_CHECKED     = 0x0008;
+    private const uint MF_BYPOSITION  = 0x0400;
     private const uint GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = 0x00000004;
     private const uint GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT = 0x00000002;
 
@@ -188,6 +202,15 @@ internal sealed class TrayWindow
         if (_hIcon != 0) DestroyIcon(_hIcon);
     }
 
+    public void SetTooltip(string text)
+    {
+        if (_hwnd == 0) return;
+        var nid = MakeNID();
+        nid.uFlags = NIF_TIP | NIF_SHOWTIP;
+        nid.szTip  = text.Length > 127 ? text[..127] : text;
+        Shell_NotifyIcon(NIM_MODIFY, ref nid);
+    }
+
     // Balloon notification. Identified by hWnd+uID, so this is safe to call from
     // any thread — the shell delivers it and routes clicks back to _hwnd's WndProc.
     public void ShowBalloon(string title, string message)
@@ -240,6 +263,9 @@ internal sealed class TrayWindow
                 case IDM_ABOUT:
                     _dispatcher.TryEnqueue(() => AboutDialog.ShowOrActivate());
                     break;
+                case IDM_PAUSE:
+                    App.Tray.SetPaused(!App.Hooks.Paused);
+                    break;
                 case IDM_QUIT:
                     RemoveTrayIcon();
                     _dispatcher.TryEnqueue(() => App.RequestShutdown());
@@ -261,11 +287,13 @@ internal sealed class TrayWindow
     private void ShowContextMenu()
     {
         nint hMenu = CreatePopupMenu();
-        InsertMenu(hMenu, 0, 0x0400,              (nint)IDM_SETTINGS, "Settings");
-        InsertMenu(hMenu, 1, 0x0400 | 0x0800, 0,                      null);
-        InsertMenu(hMenu, 2, 0x0400,              (nint)IDM_ABOUT,    "About AeroDial");
-        InsertMenu(hMenu, 3, 0x0400 | 0x0800, 0,                      null);
-        InsertMenu(hMenu, 4, 0x0400,              (nint)IDM_QUIT,     "Quit AeroDial");
+        uint pauseFlags = MF_BYPOSITION | MF_STRING | (App.Hooks.Paused ? MF_CHECKED : 0);
+        InsertMenu(hMenu, 0, MF_BYPOSITION | MF_STRING,    (nint)IDM_SETTINGS, "Settings");
+        InsertMenu(hMenu, 1, pauseFlags,                   (nint)IDM_PAUSE,    "Pause AeroDial");
+        InsertMenu(hMenu, 2, MF_BYPOSITION | MF_SEPARATOR, 0,                  null);
+        InsertMenu(hMenu, 3, MF_BYPOSITION | MF_STRING,    (nint)IDM_ABOUT,    "About AeroDial");
+        InsertMenu(hMenu, 4, MF_BYPOSITION | MF_SEPARATOR, 0,                  null);
+        InsertMenu(hMenu, 5, MF_BYPOSITION | MF_STRING,    (nint)IDM_QUIT,     "Quit AeroDial");
 
         SetForegroundWindow(_hwnd);
         GetCursorPos(out var pt);

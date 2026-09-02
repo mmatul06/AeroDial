@@ -31,8 +31,10 @@ internal static class Program
         };
 
         // ── Single-instance guard ─────────────────────────────────────────
+        // The self-test uses its own mutex so it can run beside an installed copy
+        // instead of just activating it.
         bool createdNew;
-        using var mutex = new Mutex(true, MutexName, out createdNew);
+        using var mutex = new Mutex(true, SelfTest.Enabled ? MutexName + "_SelfTest" : MutexName, out createdNew);
 
         if (!createdNew)
         {
@@ -48,7 +50,8 @@ internal static class Program
 
         // Create the activation event so secondary instances can signal us.
         using var activationEvent = new EventWaitHandle(
-            false, EventResetMode.AutoReset, AppConstants.ActivationEventName);
+            false, EventResetMode.AutoReset,
+            SelfTest.Enabled ? AppConstants.ActivationEventName + "_SelfTest" : AppConstants.ActivationEventName);
 
         // Background watcher — unblocks when a secondary instance sets the event.
         var watcher = new Thread(() =>

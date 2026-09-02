@@ -48,11 +48,18 @@ internal sealed class OverlayController : IDisposable
     // All state above is owned by the UI thread: the renderer posts input events to it
     // (see OverlayRenderer.Post) and HookService callbacks marshal via DispatcherQueue.
 
+    // Trigger gate cache: per foreground window, whether an app profile disables the dial.
+    private bool _hasDisabledProfiles;
+    private nint _gateHwnd;
+    private bool _gateAllowed = true;
+
     public OverlayController()
     {
         App.Hooks.TriggerActivated += OnTriggerActivated;
         App.Hooks.TriggerReleased  += OnTriggerReleased;
         App.Hooks.ScrollWheeled    += OnScrollWheeled;
+        App.Hooks.NavKeyPressed    += OnNavKeyPressed;
+        App.Hooks.TriggerGate       = TriggerAllowedForForeground;
         App.Config.ConfigChanged   += RefreshMenuFlags;
         RefreshMenuFlags();
     }
@@ -61,6 +68,22 @@ internal sealed class OverlayController : IDisposable
     {
         _needsActiveTasks = App.Config.Current.Menus.Any(m =>
             m.Items.Any(i => i.SubMenuId == AppConstants.ActiveTasksMenuId));
+        _hasDisabledProfiles = App.Config.Current.AppProfiles.Any(p => p.MenuId == ProfileMatcher.DisabledMenuId);
+        _gateHwnd = 0; // invalidate the cache
+    }
+
+    /// <summary>Called on the hook thread before a trigger press is swallowed. Returns false
+    /// when an app profile disables the dial for the foreground app, so the button or key
+    /// passes through to that app instead. Cached per foreground window: the lookup costs a
+    /// process-name query, which must not run on every click.</summary>
+    private bool TriggerAllowedForForeground()
+    {
+        if (!_hasDisabledProfiles) return true;
+        var hwnd = Win32.GetForegroundWindow();
+        if (hwnd == _gateHwnd) return _gateAllowed;
+        _gateAllowed = !ProfileMatcher.IsDisabledFor(App.Config.Current, GetForegroundProcessName());
+        _gateHwnd    = hwnd;
+        return _gateAllowed;
     }
 
     // ── Trigger ───────────────────────────────────────────────────────────
@@ -377,6 +400,37 @@ internal sealed class OverlayController : IDisposable
         });
     }
 
+    // ── Keyboard navigation ───────────────────────────────────────────────
+
+    private void OnNavKeyPressed(int vk)
+    {
+        App.Tray.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_isOpen) return;
+            switch (vk)
+            {
+                case 0x27 or 0x28: _window?.KeyboardStep(+1); break;  // Right / Down: clockwise
+                case 0x25 or 0x26: _window?.KeyboardStep(-1); break;  // Left / Up: counter-clockwise
+                case 0x1B: Close(); break;                            // Escape
+                case 0x08: NavigateBack(); break;                     // Backspace
+                case 0x0D: ExecuteHighlighted(); break;               // Enter
+                case >= 0x31 and <= 0x39: _window?.KeyboardSelect(vk - 0x31); break;  // 1-9
+                case >= 0x61 and <= 0x69: _window?.KeyboardSelect(vk - 0x61); break;  // numpad 1-9
+            }
+        });
+    }
+
+    /// <summary>Enter: act on the innermost highlighted item (L3 > L2 > L1), like a click.</summary>
+    private void ExecuteHighlighted()
+    {
+        if (_l3HoveredIndex >= 0 && _l3Menu is not null && _l3HoveredIndex < _l3Menu.Items.Count)
+            ExecuteItem(_l3Menu.Items[_l3HoveredIndex]);
+        else if (_childHoveredIndex >= 0 && _childMenu is not null && _childHoveredIndex < _childMenu.Items.Count)
+            ExecuteItem(_childMenu.Items[_childHoveredIndex]);
+        else if (_hoveredIndex >= 0 && _currentMenu is not null && _hoveredIndex < _currentMenu.Items.Count)
+            ExecuteItem(_currentMenu.Items[_hoveredIndex]); // submenus drill in, everything else runs
+    }
+
     // ── Navigate back (center click) ──────────────────────────────────────
 
     public void NavigateBack()
@@ -644,6 +698,8 @@ internal sealed class OverlayController : IDisposable
         App.Hooks.TriggerActivated -= OnTriggerActivated;
         App.Hooks.TriggerReleased  -= OnTriggerReleased;
         App.Hooks.ScrollWheeled    -= OnScrollWheeled;
+        App.Hooks.NavKeyPressed    -= OnNavKeyPressed;
+        App.Hooks.TriggerGate       = null;
         App.Config.ConfigChanged   -= RefreshMenuFlags;
         _window?.Dispose();
     }

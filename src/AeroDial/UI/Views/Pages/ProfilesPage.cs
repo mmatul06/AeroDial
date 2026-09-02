@@ -37,7 +37,8 @@ public sealed partial class ProfilesPage : Page
         stack.Children.Add(PageKit.PageHeader("App Profiles"));
         stack.Children.Add(PageKit.InfoCard(
             "Assign a menu to an app. When that app is in the foreground and you open the dial, " +
-            "it shows the assigned menu instead of the default. Apps are matched by process name."));
+            "it shows the assigned menu instead of the default. Apps are matched by process name. " +
+            "Choose Disabled to keep the dial out of an app entirely (the trigger button passes through)."));
 
         _profiles = App.Config.Current.AppProfiles
             .Select(p => new AppProfileConfig { ProcessName = p.ProcessName, MenuId = p.MenuId })
@@ -116,13 +117,19 @@ public sealed partial class ProfilesPage : Page
 
             var arrow = new TextBlock { Text = "→", VerticalAlignment = VerticalAlignment.Center, FontSize = 15 };
 
-            var combo = new ComboBox { Width = 200 };
+            var combo = new ComboBox { Width = 220 };
             int selected = -1;
             for (int m = 0; m < menus.Count; m++)
             {
                 combo.Items.Add(new ComboBoxItem { Content = menus[m].Name, Tag = menus[m].Id });
                 if (menus[m].Id == prof.MenuId) selected = m;
             }
+            // Reserved target: the dial does not open for this app and the trigger passes through.
+            var disabledItem = new ComboBoxItem { Content = "Disabled (dial does not open)", Tag = ProfileMatcher.DisabledMenuId };
+            ToolTipService.SetToolTip(disabledItem, "Useful for games or apps that use the trigger button themselves.");
+            combo.Items.Add(disabledItem);
+            if (prof.MenuId == ProfileMatcher.DisabledMenuId) selected = combo.Items.Count - 1;
+
             combo.SelectedIndex = selected >= 0 ? selected : 0;
             if (selected < 0 && menus.Count > 0) prof.MenuId = menus[0].Id; // fell back — keep model in sync
             combo.SelectionChanged += (_, _) =>

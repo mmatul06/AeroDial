@@ -100,6 +100,14 @@ internal sealed class OverlayWindow : IDisposable
     public void ReplaceMenu(RadialMenuConfig menu)
         => _renderer.ReplaceMenu(menu);
 
+    /// <summary>Keyboard: move the highlight on the innermost open ring by delta slices.</summary>
+    public void KeyboardStep(int delta)
+        => _renderer.KeyboardStep(delta);
+
+    /// <summary>Keyboard: highlight main-ring slice at index (digit keys).</summary>
+    public void KeyboardSelect(int index)
+        => _renderer.KeyboardSelect(index);
+
     /// <summary>Flashes the volume arc on a scroll-wheel volume action.</summary>
     public void TriggerVolumeFlash()
         => _renderer.TriggerVolumeFlash();

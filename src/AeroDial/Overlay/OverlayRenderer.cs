@@ -136,6 +136,62 @@ internal sealed class OverlayRenderer : IDisposable
     private long _pollHeartbeatAt = long.MinValue / 2;
     private long _pollCount, _frameCount;
 
+    // ── Keyboard highlight ────────────────────────────────────────────────
+    // Arrow/digit keys set a highlight that overrides the cursor-derived hover for one ring
+    // until the cursor actually moves. Everything downstream (child ring opening, center
+    // label, execution) flows through the normal hover path, so keyboard and mouse agree.
+    private int _kbRing  = -1;   // 0 = main, 1 = child, 2 = L3; -1 = none
+    private int _kbIndex = -1;
+    private Win32.POINT _kbAnchor;
+    private const int KbAnchorTolerancePx = 4;
+
+    public void KeyboardStep(int delta)
+    {
+        lock (_lock)
+        {
+            int ring, count, current;
+            if (_l3Menu is not null && _l3Menu.Items.Count > 0)
+                { ring = 2; count = _l3Menu.Items.Count;    current = _l3HoveredIndex; }
+            else if (_childMenu is not null && _childMenu.Items.Count > 0)
+                { ring = 1; count = _childMenu.Items.Count; current = _childHoveredIndex; }
+            else
+                { ring = 0; count = Math.Clamp(App.Config.Current.Appearance.SliceCount, 3, 12); current = _hoveredIndex; }
+
+            int next = current < 0
+                ? (delta > 0 ? 0 : count - 1)
+                : ((current + delta) % count + count) % count;
+            SetKeyboardHighlight(ring, next);
+        }
+        MarkDirty();
+    }
+
+    public void KeyboardSelect(int index)
+    {
+        lock (_lock)
+        {
+            int count = Math.Clamp(App.Config.Current.Appearance.SliceCount, 3, 12);
+            if (index < 0 || index >= count) return;
+            SetKeyboardHighlight(0, index);
+        }
+        MarkDirty();
+    }
+
+    // Must be called under _lock.
+    private void SetKeyboardHighlight(int ring, int index)
+    {
+        _kbRing  = ring;
+        _kbIndex = index;
+        _kbAnchor = TestInputEnabled
+            ? new Win32.POINT { X = TestCursorX, Y = TestCursorY }
+            : GetCursorPosSafe();
+    }
+
+    private static Win32.POINT GetCursorPosSafe()
+    {
+        Win32.GetCursorPos(out var p);
+        return p;
+    }
+
     // ── Test hooks (Core/SelfTest.cs) ─────────────────────────────────────
     // When enabled, PollInput reads this virtual cursor / button state instead of the
     // real mouse, so the full input path can be exercised without moving the pointer.
@@ -377,6 +433,7 @@ internal sealed class OverlayRenderer : IDisposable
             _l3HoveredIndex = -1;
             _l3AnimProgress = 0f;
             _l3Animating    = false;
+            _kbRing = _kbIndex = -1;
         }
         MarkDirty();
     }
@@ -735,6 +792,41 @@ internal sealed class OverlayRenderer : IDisposable
             // When in L3 zone, keep L2's parent index highlighted
             if (inL3Zone) newChildHovered = l3ParentIdx;
 
+            // ── Keyboard highlight override (until the cursor moves) ───────
+            int kbRing, kbIndex;
+            lock (_lock)
+            {
+                if (_kbRing >= 0 &&
+                    (Math.Abs(screenPt.X - _kbAnchor.X) > KbAnchorTolerancePx ||
+                     Math.Abs(screenPt.Y - _kbAnchor.Y) > KbAnchorTolerancePx))
+                    _kbRing = _kbIndex = -1; // mouse took over
+                kbRing = _kbRing; kbIndex = _kbIndex;
+            }
+            if (kbRing == 2 && l3Menu is not null)
+            {
+                newL3Hovered    = Math.Min(kbIndex, l3Menu.Items.Count - 1);
+                newChildHovered = l3ParentIdx;
+                inL3Zone = inChildZone = true;
+            }
+            else if (kbRing == 1 && childMenu is not null)
+            {
+                newL3Hovered    = -1;
+                newChildHovered = Math.Min(kbIndex, childMenu.Items.Count - 1);
+                inL3Zone = false; inChildZone = true;
+            }
+            else if (kbRing == 0)
+            {
+                newL3Hovered = newChildHovered = -1;
+                inL3Zone = inChildZone = false;
+            }
+
+            // Re-evaluate the child-ring hover events with the override applied
+            lock (_lock)
+            {
+                if (newL3Hovered != _l3HoveredIndex) { _l3HoveredIndex = newL3Hovered; _l3HoverStart = _clock.ElapsedMilliseconds; MarkDirty(); Post(InputKind.L3Hover, newL3Hovered); }
+                if (newChildHovered != _childHoveredIndex) { _childHoveredIndex = newChildHovered; _childHoverStart = _clock.ElapsedMilliseconds; MarkDirty(); Post(InputKind.ChildHover, newChildHovered); }
+            }
+
             bool childHoverChanged;
             lock (_lock)
             {
@@ -763,6 +855,7 @@ internal sealed class OverlayRenderer : IDisposable
                 // Keep L1 parent highlighted while cursor is in any child zone
                 newHovered = childParentIdx;
             }
+            if (kbRing == 0) { newHovered = kbIndex; isCenter = false; }
 
             bool hoverChanged;
             lock (_lock)

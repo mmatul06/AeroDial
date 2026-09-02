@@ -80,6 +80,18 @@ internal static class SelfTest
             Cursor(cx + 2, cy + 2); Sleep(200);
             Click(); Sleep(700);                                   // center at root → NavigateBack → Close
 
+            // Keyboard navigation: open, step Right twice (highlights slice 1), digit 2 (slice 1
+            // via digit), Backspace at root (closes the child ring if any, else nothing), Escape closes.
+            Logger.Info("SELFTEST: keyboard");
+            Ui(() => App.Overlay.OpenAtCursor(new System.Drawing.Point(cx, cy)));
+            Sleep(600);
+            App.Hooks.SimulateNavKey(0x27); Sleep(300);            // Right → slice 0
+            App.Hooks.SimulateNavKey(0x27); Sleep(400);            // Right → slice 1 (Apps submenu → child ring)
+            Shot(() => ScreenCapture.CaptureScreen(cx - capHalf, cy - capHalf, capHalf * 2, capHalf * 2,
+                Path.Combine(shots, "overlay-keyboard.png")));
+            App.Hooks.SimulateNavKey(0x33); Sleep(300);            // digit 3 → slice 2
+            App.Hooks.SimulateNavKey(0x1B); Sleep(700);            // Escape → close
+
             // Settings window: construct it and walk every page. A page whose constructor
             // throws surfaces as an "Unhandled XAML exception" FATAL line in the log.
             Logger.Info("SELFTEST: settings pages");
