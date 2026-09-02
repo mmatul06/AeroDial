@@ -113,26 +113,12 @@ internal sealed class ConfigService
         ConfigChanged?.Invoke();
     }
 
-    /// <summary>Returns the active menu for the given foreground process name.</summary>
-    public RadialMenuConfig GetActiveMenu(string? processName = null)
-    {
-        if (processName is not null)
-        {
-            var profile = Current.AppProfiles.FirstOrDefault(p =>
-                string.Equals(p.ProcessName, processName, StringComparison.OrdinalIgnoreCase));
-
-            if (profile is not null)
-            {
-                var menu = Current.Menus.FirstOrDefault(m => m.Id == profile.MenuId);
-                if (menu is not null) return menu;
-            }
-        }
-
-        return Current.Menus.FirstOrDefault(m => m.Id == Current.ActiveMenuId)
-               ?? Current.Menus.First();
-    }
+    /// <summary>Returns the active menu for the given foreground process name, or null when an
+    /// app profile disables the dial for that process (see ProfileMatcher).</summary>
+    public RadialMenuConfig? GetActiveMenu(string? processName = null)
+        => ProfileMatcher.GetActiveMenu(Current, processName);
 
     /// <summary>Resolve a submenu by id.</summary>
     public RadialMenuConfig? GetMenu(string id)
-        => Current.Menus.FirstOrDefault(m => m.Id == id);
+        => ProfileMatcher.GetMenu(Current, id);
 }

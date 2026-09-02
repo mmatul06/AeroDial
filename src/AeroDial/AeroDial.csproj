@@ -59,6 +59,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Models + pure logic (key-combo parsing, ring geometry, config migration, profiles) -->
+    <ProjectReference Include="..\AeroDial.Core\AeroDial.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260317003" />
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
     <PackageReference Include="SkiaSharp.Views.WinUI" Version="2.88.8" />

@@ -92,70 +92,35 @@ internal sealed class ActionDispatcher
     private static void SendKeyCombo(MenuItemConfig item)
     {
         if (string.IsNullOrWhiteSpace(item.KeyCombo)) return;
-        if (!SendChord(item.KeyCombo))
+        if (KeyComboParser.Parse(item.KeyCombo).IsEmpty)
+        {
             App.Tray.ShowBalloon("Unrecognized key combo",
                 $"\"{item.KeyCombo}\" has no keys AeroDial understands.");
+            return;
+        }
+
+        // A key combo is a one-step macro: same sender, same release-all-held-keys
+        // safety net, and it runs off the caller's thread like every other macro.
+        var combo = item.KeyCombo;
+        _ = Task.Run(() => RunMacroSequence([new MacroStep { Type = MacroStepType.KeyPress, Value = combo }]));
     }
 
     /// <summary>Presses a chord like "Ctrl+S": modifiers down → keys down → all up
     /// (reverse order). Returns false if no recognized keys were found.</summary>
     private static bool SendChord(string chord)
     {
-        var parts     = chord.Split('+', StringSplitOptions.RemoveEmptyEntries);
-        var keys      = new List<byte>();
-        var modifiers = new List<byte>();
+        var parsed = KeyComboParser.Parse(chord);
+        if (parsed.IsEmpty) return false;
 
-        foreach (var part in parts)
-        {
-            byte vk = TokenToVk(part);
-            if (vk == 0) continue;
-            if (vk is 0x5B or 0x11 or 0x12 or 0x10) modifiers.Add(vk);
-            else                                    keys.Add(vk);
-        }
-
-        if (modifiers.Count == 0 && keys.Count == 0) return false;
-
-        // Build input array: press modifiers → press keys → release keys → release modifiers
-        var allDown = modifiers.Concat(keys).ToArray();
-        var allUp   = allDown.Reverse().ToArray();
-
-        var inputs = new Win32.INPUT[allDown.Length + allUp.Length];
+        // press modifiers → press keys → release keys → release modifiers
+        var allDown = parsed.PressOrder.ToArray();
+        var inputs  = new Win32.INPUT[allDown.Length * 2];
         int i = 0;
         foreach (var vk in allDown) inputs[i++] = MakeKeyInput(vk, false);
-        foreach (var vk in allUp)   inputs[i++] = MakeKeyInput(vk, true);
+        for (int k = allDown.Length - 1; k >= 0; k--) inputs[i++] = MakeKeyInput(allDown[k], true);
 
         Win32.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Win32.INPUT>());
         return true;
-    }
-
-    /// <summary>Maps a key token ("Ctrl", "Enter", "A", "F5", "5") to a virtual-key code.
-    /// Returns 0 for unrecognized tokens.</summary>
-    private static byte TokenToVk(string token)
-    {
-        string t = token.Trim().ToUpperInvariant();
-        return t switch
-        {
-            "WIN"   or "WINDOWS"  => 0x5B,
-            "CTRL"  or "CONTROL"  => 0x11,
-            "ALT"                 => 0x12,
-            "SHIFT"               => 0x10,
-            "TAB"                 => 0x09,
-            "ENTER" or "RETURN"   => 0x0D,
-            "ESC"   or "ESCAPE"   => 0x1B,
-            "SPACE"               => 0x20,
-            "DEL"   or "DELETE"   => 0x2E,
-            "BACKSPACE" or "BKSP" => 0x08,
-            "HOME"                => 0x24,
-            "END"                 => 0x23,
-            "LEFT"                => 0x25,
-            "UP"                  => 0x26,
-            "RIGHT"               => 0x27,
-            "DOWN"                => 0x28,
-            _ when t.Length == 1 && char.IsLetterOrDigit(t[0]) => (byte)t[0],
-            _ when t.Length >= 2 && t[0] == 'F' && int.TryParse(t.AsSpan(1), out int fn)
-                                 && fn is >= 1 and <= 24        => (byte)(0x6F + fn),
-            _                     => 0,
-        };
     }
 
     // ── Macros ────────────────────────────────────────────────────────────
@@ -192,14 +157,14 @@ internal sealed class ActionDispatcher
 
                     case MacroStepType.KeyDown:
                     {
-                        byte vk = TokenToVk(step.Value);
+                        byte vk = KeyComboParser.TokenToVk(step.Value);
                         if (vk != 0) { SendVk(vk, keyUp: false); held.Add(vk); await Task.Delay(interKeyDelayMs); }
                         break;
                     }
 
                     case MacroStepType.KeyUp:
                     {
-                        byte vk = TokenToVk(step.Value);
+                        byte vk = KeyComboParser.TokenToVk(step.Value);
                         if (vk != 0) { SendVk(vk, keyUp: true); held.Remove(vk); await Task.Delay(interKeyDelayMs); }
                         break;
                     }

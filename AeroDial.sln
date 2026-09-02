@@ -4,6 +4,10 @@ VisualStudioVersion = 18.4.11626.88 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AeroDial", "src\AeroDial\AeroDial.csproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AeroDial.Core", "src\AeroDial.Core\AeroDial.Core.csproj", "{B7C2D6A1-4E3F-4C8A-9D21-5F0E7A3B9C11}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AeroDial.Tests", "tests\AeroDial.Tests\AeroDial.Tests.csproj", "{C9D3E7B2-5F4A-4D9B-AE32-6A1F8B4C0D22}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -14,6 +18,14 @@ Global
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|x64.Build.0 = Debug|x64
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x64.ActiveCfg = Release|x64
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x64.Build.0 = Release|x64
+		{B7C2D6A1-4E3F-4C8A-9D21-5F0E7A3B9C11}.Debug|x64.ActiveCfg = Debug|x64
+		{B7C2D6A1-4E3F-4C8A-9D21-5F0E7A3B9C11}.Debug|x64.Build.0 = Debug|x64
+		{B7C2D6A1-4E3F-4C8A-9D21-5F0E7A3B9C11}.Release|x64.ActiveCfg = Release|x64
+		{B7C2D6A1-4E3F-4C8A-9D21-5F0E7A3B9C11}.Release|x64.Build.0 = Release|x64
+		{C9D3E7B2-5F4A-4D9B-AE32-6A1F8B4C0D22}.Debug|x64.ActiveCfg = Debug|x64
+		{C9D3E7B2-5F4A-4D9B-AE32-6A1F8B4C0D22}.Debug|x64.Build.0 = Debug|x64
+		{C9D3E7B2-5F4A-4D9B-AE32-6A1F8B4C0D22}.Release|x64.ActiveCfg = Release|x64
+		{C9D3E7B2-5F4A-4D9B-AE32-6A1F8B4C0D22}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -139,7 +139,13 @@ internal sealed class OverlayController : IDisposable
         }, TaskContinuationOptions.ExecuteSynchronously);
 
         string? processName = GetForegroundProcessName();
-        _currentMenu       = App.Config.GetActiveMenu(processName);
+        var menu = App.Config.GetActiveMenu(processName);
+        if (menu is null)
+        {
+            Logger.Debug($"Overlay not opened: dial is disabled for '{processName}'.");
+            return;
+        }
+        _currentMenu = menu;
         PrefetchSubmenuIcons(_currentMenu);
         _menuStack.Clear();
         _hoveredIndex      = -1;
