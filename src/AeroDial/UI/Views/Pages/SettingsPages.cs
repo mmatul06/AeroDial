@@ -13,8 +13,6 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using SkiaSharp;
 using SkiaSharp.Views.Windows;
-using Windows.Storage.Pickers;
-using WinRT.Interop;
 
 namespace AeroDial.UI.Views.Pages;
 
@@ -1753,6 +1751,7 @@ public sealed partial class MenusPage : Page
 
     private void OnRingPaint(object? sender, SKPaintSurfaceEventArgs e)
     {
+        IconRegistry.DrainRetired(); // free bitmaps invalidated by the icon picker (grace period elapsed)
         var canvas = e.Surface.Canvas;
         canvas.Clear(SKColors.Transparent);
 
@@ -1957,32 +1956,29 @@ public sealed partial class MenusPage : Page
 
     // ── File pickers ──────────────────────────────────────────────────────
 
+    // Both handlers are async void (event handlers must be), so nothing may escape them:
+    // Pickers.* already swallows picker failures, and the try/catch covers the UI update.
+
     private async void BrowseIconAsync(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker();
-        InitializeWithWindow.Initialize(picker, SettingsWindow.WindowHandle);
-        picker.FileTypeFilter.Add(".png");
-        picker.FileTypeFilter.Add(".jpg");
-        picker.FileTypeFilter.Add(".jpeg");
-        picker.FileTypeFilter.Add(".ico");
-        picker.FileTypeFilter.Add(".bmp");
-        var file = await picker.PickSingleFileAsync();
-        if (file is not null)
+        try
         {
-            _iconBox.Text = file.Path;
-            IconRegistry.Invalidate(file.Path);
+            var path = await Pickers.PickFileAsync(".png", ".jpg", ".jpeg", ".ico", ".bmp");
+            if (path is null) return;
+            _iconBox.Text = path;
+            IconRegistry.Invalidate(path);
         }
+        catch (Exception ex) { Logger.Error("BrowseIcon failed", ex); }
     }
 
     private async void BrowseAppAsync(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker();
-        InitializeWithWindow.Initialize(picker, SettingsWindow.WindowHandle);
-        picker.FileTypeFilter.Add(".exe");
-        picker.FileTypeFilter.Add(".lnk");
-        picker.FileTypeFilter.Add("*");
-        var file = await picker.PickSingleFileAsync();
-        if (file is not null) _appPath.Text = file.Path;
+        try
+        {
+            var path = await Pickers.PickFileAsync(".exe", ".lnk", ".bat", ".cmd");
+            if (path is not null) _appPath.Text = path;
+        }
+        catch (Exception ex) { Logger.Error("BrowseApp failed", ex); }
     }
 
     // ── Presets ───────────────────────────────────────────────────────────

@@ -9,6 +9,8 @@ namespace AeroDial.Config;
 
 public sealed class AeroDialConfig
 {
+    /// <summary>Schema version. Documents without it are treated as v1. See ConfigMigrator.</summary>
+    public int                    ConfigVersion { get; set; } = ConfigMigrator.CurrentVersion;
     public TriggerConfig          Trigger       { get; set; } = new();
     public AppearanceConfig       Appearance    { get; set; } = new();
     public BehaviorConfig         Behavior      { get; set; } = new();

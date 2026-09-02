@@ -21,6 +21,9 @@ internal static class Program
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             Logger.Fatal("UnhandledException", e.ExceptionObject as Exception);
 
+        // `--selftest`: scripted overlay smoke test, exits when done (see Core/SelfTest.cs)
+        SelfTest.Enabled = Array.Exists(args, a => string.Equals(a, "--selftest", StringComparison.OrdinalIgnoreCase));
+
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
             Logger.Error("UnobservedTaskException", e.Exception);

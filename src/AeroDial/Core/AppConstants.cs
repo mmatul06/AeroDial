@@ -26,6 +26,9 @@ internal static class AppConstants
     public static readonly string ConfigPath =
         Path.Combine(AppDataDir, "config.json");
 
+    public static readonly string ConfigBackupPath =
+        Path.Combine(AppDataDir, "config.json.bak");
+
     public static readonly string LogPath =
         Path.Combine(AppDataDir, "aerodial.log");
 

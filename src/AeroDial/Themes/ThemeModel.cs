@@ -76,17 +76,42 @@ public sealed class AeroTheme
 
     // ── Helpers ───────────────────────────────────────────────────────────
 
+    // The renderer resolves ~150 colors per frame; parsing allocated two strings each time.
+    // Theme colors are a small fixed set, so a process-wide cache keyed by the hex string
+    // turns every call after the first into a dictionary lookup.
+    private static readonly Dictionary<string, SKColor> s_colorCache = new();
+    private static readonly object s_colorLock = new();
+
     public SKColor ToSKColor(string hex)
     {
-        hex = hex.TrimStart('#');
-        if (hex.Length == 6) hex = "FF" + hex;
-        if (!uint.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out var argb))
-            return SKColors.White;
+        lock (s_colorLock)
+        {
+            if (s_colorCache.TryGetValue(hex, out var cached)) return cached;
+            var parsed = ParseColor(hex);
+            if (s_colorCache.Count > 512) s_colorCache.Clear(); // theme editor can churn values
+            s_colorCache[hex] = parsed;
+            return parsed;
+        }
+    }
+
+    private static SKColor ParseColor(string hex)
+    {
+        var span = hex.AsSpan().TrimStart('#');
+        uint argb;
+        bool ok = span.Length switch
+        {
+            6 => uint.TryParse(span, System.Globalization.NumberStyles.HexNumber, null, out argb) && (argb |= 0xFF000000u) != 0,
+            8 => uint.TryParse(span, System.Globalization.NumberStyles.HexNumber, null, out argb),
+            _ => Fail(out argb),
+        };
+        if (!ok) return SKColors.White;
         return new SKColor(
             red:   (byte)((argb >> 16) & 0xFF),
             green: (byte)((argb >>  8) & 0xFF),
             blue:  (byte)( argb        & 0xFF),
             alpha: (byte)((argb >> 24) & 0xFF));
+
+        static bool Fail(out uint v) { v = 0; return false; }
     }
 
     public SKPaint MakePaint(string hexColor, SKPaintStyle style = SKPaintStyle.Fill)

@@ -76,6 +76,71 @@ internal sealed class OverlayRenderer : IDisposable
     private Thread?       _renderThread;
     private volatile bool _renderRunning;
     private int           _renderGeneration; // incremented on each BeginShow to evict stale threads
+    private readonly ManualResetEventSlim _firstFrameDone = new(false);
+
+    // ── Input events → UI thread ──────────────────────────────────────────
+    // PollInput runs on the render thread but the controller's menu state machine must
+    // run on exactly one thread. Semantic events (hover changed, item clicked, ...) are
+    // queued here and drained on the UI thread via DispatcherQueue, in order. Purely
+    // visual hover feedback stays renderer-local so it remains zero-latency.
+    private enum InputKind { Hover, Click, Center, ChildClick, ChildHover, L3Click, L3Hover, Outside }
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(InputKind Kind, int Index)> _events = new();
+    private int _drainPending;
+
+    private void Post(InputKind kind, int index = -1)
+    {
+        _events.Enqueue((kind, index));
+        if (Interlocked.Exchange(ref _drainPending, 1) == 0)
+            App.Tray.DispatcherQueue.TryEnqueue(DrainEvents);
+    }
+
+    private void DrainEvents()
+    {
+        Interlocked.Exchange(ref _drainPending, 0);
+        while (_events.TryDequeue(out var e))
+        {
+            if (e.Kind is not (InputKind.Hover or InputKind.ChildHover or InputKind.L3Hover))
+                Logger.Debug($"Input event: {e.Kind} {e.Index}");
+            switch (e.Kind)
+            {
+                case InputKind.Hover:      HoveredIndexChanged?.Invoke(e.Index);      break;
+                case InputKind.Click:      ItemClicked?.Invoke(e.Index);              break;
+                case InputKind.Center:     CenterClicked?.Invoke();                   break;
+                case InputKind.ChildClick: ChildItemClicked?.Invoke(e.Index);         break;
+                case InputKind.ChildHover: ChildHoveredIndexChanged?.Invoke(e.Index); break;
+                case InputKind.L3Click:    L3ItemClicked?.Invoke(e.Index);            break;
+                case InputKind.L3Hover:    L3HoveredIndexChanged?.Invoke(e.Index);    break;
+                case InputKind.Outside:    ClickedOutside?.Invoke();                  break;
+            }
+        }
+    }
+
+    // ── Dirty flag + static layer ─────────────────────────────────────────
+    // The ring is only re-rasterized when something changed (hover, menu, animation).
+    // Between changes the loop keeps polling input at full rate but re-composites the
+    // cached ring layer at a low idle cadence for the continuous effects (shimmer,
+    // visualizer, volume lerp).
+    private int  _dirty = 1;
+    private long _lastFrameAt = long.MinValue / 2;
+    private const int IdleFrameIntervalMs = 42; // ~24 fps
+    private SKBitmap? _staticLayer;
+    private SKCanvas? _staticCanvas;
+    private bool      _staticValid;
+    private bool      _transientGradients;
+    private readonly SKPaint _blitPaint = new() { BlendMode = SKBlendMode.Src };
+
+    private void MarkDirty() => Interlocked.Exchange(ref _dirty, 1);
+
+    // Debug-logging diagnostics (only emitted when debug logging is enabled)
+    private long _pollHeartbeatAt = long.MinValue / 2;
+    private long _pollCount, _frameCount;
+
+    // ── Test hooks (Core/SelfTest.cs) ─────────────────────────────────────
+    // When enabled, PollInput reads this virtual cursor / button state instead of the
+    // real mouse, so the full input path can be exercised without moving the pointer.
+    internal static volatile bool TestInputEnabled;
+    internal static volatile int  TestCursorX, TestCursorY;
+    internal static volatile bool TestLmbDown;
 
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private long _animStart;
@@ -97,6 +162,7 @@ internal sealed class OverlayRenderer : IDisposable
         long now = _clock.ElapsedMilliseconds;
         Interlocked.Exchange(ref _volumeFlashAt, now);
         Interlocked.Exchange(ref _showVolumeLabelUntil, now + 2000);
+        MarkDirty();
     }
 
     private readonly SKPaint _fill   = new() { IsAntialias = true };
@@ -228,10 +294,22 @@ internal sealed class OverlayRenderer : IDisposable
         _bitmap = new SKBitmap();
         _bitmap.InstallPixels(info, _pBits, size * 4);
         _bitmapCanvas = new SKCanvas(_bitmap);
+
+        // Offscreen layer holding the rasterized ring (same format as the DIB so the
+        // per-frame blit is a straight pixel copy).
+        _staticLayer  = new SKBitmap(size, size, SKColorType.Bgra8888, SKAlphaType.Premul);
+        _staticCanvas = new SKCanvas(_staticLayer);
+        _staticValid  = false;
     }
 
     private void ReleaseDIBSection()
     {
+        _staticCanvas?.Dispose();
+        _staticCanvas = null;
+        _staticLayer?.Dispose();
+        _staticLayer  = null;
+        _staticValid  = false;
+
         _bitmapCanvas?.Dispose();
         _bitmapCanvas = null;
         _bitmap?.Dispose(); // does not free _pBits — DIBSection owns it
@@ -299,6 +377,7 @@ internal sealed class OverlayRenderer : IDisposable
             _l3AnimProgress = 0f;
             _l3Animating    = false;
         }
+        MarkDirty();
     }
 
     public void BeginHide(Action onComplete)
@@ -312,6 +391,7 @@ internal sealed class OverlayRenderer : IDisposable
             _childAnimProgress = 0f;
             _childAnimating = false;
         }
+        MarkDirty();
     }
 
     public void NavigateTo(RadialMenuConfig menu, bool hasParent)
@@ -335,6 +415,19 @@ internal sealed class OverlayRenderer : IDisposable
             _l3AnimProgress = 0f;
             _l3Animating    = false;
         }
+        MarkDirty();
+    }
+
+    /// <summary>Swaps the main ring's menu without resetting navigation or animation state
+    /// (used when a dynamic menu finishes building after it was already shown).</summary>
+    public void ReplaceMenu(RadialMenuConfig menu)
+    {
+        lock (_lock)
+        {
+            _menu         = menu;
+            _hoveredIndex = -1;
+        }
+        MarkDirty();
     }
 
     public void ShowChildMenu(RadialMenuConfig menu, int parentIndex)
@@ -349,6 +442,20 @@ internal sealed class OverlayRenderer : IDisposable
             _childAnimating    = true;
             _childAnimProgress = 0f;
         }
+        MarkDirty();
+    }
+
+    /// <summary>Swaps the child ring's menu in place, keeping its pop-out animation state.</summary>
+    public void ReplaceChildMenu(RadialMenuConfig menu)
+    {
+        lock (_lock)
+        {
+            if (_childMenu is null) return;
+            _childMenu         = menu;
+            _childHoveredIndex = -1;
+            _childHoverStart   = 0;
+        }
+        MarkDirty();
     }
 
     public void HideChildMenu()
@@ -367,6 +474,7 @@ internal sealed class OverlayRenderer : IDisposable
             _l3AnimProgress = 0f;
             _l3Animating    = false;
         }
+        MarkDirty();
     }
 
     public void ShowL3Menu(RadialMenuConfig menu, int l2ParentIndex)
@@ -381,6 +489,7 @@ internal sealed class OverlayRenderer : IDisposable
             _l3Animating    = true;
             _l3AnimProgress = 0f;
         }
+        MarkDirty();
     }
 
     public void HideL3Menu()
@@ -393,56 +502,85 @@ internal sealed class OverlayRenderer : IDisposable
             _l3AnimProgress = 0f;
             _l3Animating    = false;
         }
+        MarkDirty();
     }
 
     public void UpdateWindowRect(int left, int top, int size)
     {
         lock (_lock) { _winLeft = left; _winTop = top; _winSize = size; }
+        MarkDirty();
     }
 
     /// <summary>
-    /// Renders the first frame synchronously (so the layered window has pixel content the
-    /// instant it becomes visible), then launches the dedicated render thread.
+    /// Launches the dedicated render thread and waits (briefly) for it to flush the first
+    /// frame, so the layered window has pixel content the instant it becomes visible.
+    /// Nothing touches the DIBSection or the Skia caches from the calling thread.
     /// Must be called after <see cref="BeginShow"/> and before <c>ShowWindow</c>.
     /// </summary>
     public void PreRender()
     {
-        // Wait for any previous render thread to exit its current frame before touching
-        // the shared DIBSection memory. The frame is typically <5ms so Join(100) is safe.
+        // The previous render thread (if any) was told to exit by BeginShow bumping the
+        // generation; it leaves after its current frame (a few ms). Wait so two threads
+        // never write the DIBSection concurrently.
         Thread? old = _renderThread;
         if (old is not null && old.IsAlive) old.Join(100);
 
-        RenderFrame(); // first frame on the caller thread — no blank flash on show
+        _firstFrameDone.Reset();
+        MarkDirty();
 
-        // Launch the dedicated render thread. Capturing _renderGeneration before thread
-        // start ensures the thread always has the correct generation even if BeginShow
-        // is called again before the thread reads the field.
+        // Capturing _renderGeneration before thread start ensures the thread always has
+        // the correct generation even if BeginShow is called again before it reads the field.
         _renderRunning = true;
         int gen = _renderGeneration;
         var t = new Thread(RenderLoop) { IsBackground = true, Name = "AeroDial.RenderThread" };
         t.Start(gen);
         _renderThread = t;
+
+        // Bounded wait: a stalled render thread must never hang the UI thread.
+        _firstFrameDone.Wait(80);
     }
 
     // ── Render thread loop ────────────────────────────────────────────────
 
     private void RenderLoop(object? state)
     {
-        int myGeneration = (int)state!;
-        var sw = new Stopwatch();
+        int  myGeneration  = (int)state!;
+        var  sw            = new Stopwatch();
+        bool firstSignaled = false;
+        Logger.Debug($"Render loop started (gen {myGeneration}).");
 
         while (_renderRunning && _renderGeneration == myGeneration)
         {
             sw.Restart();
             try
             {
+                IconRegistry.DrainRetired();
                 PollInput();
-                RenderFrame();
+
+                bool animating;
+                lock (_lock)
+                {
+                    animating = _animState is AnimState.Opening or AnimState.Closing
+                             || _childAnimating || _l3Animating;
+                }
+
+                bool dirty    = Interlocked.Exchange(ref _dirty, 0) == 1 || animating;
+                long now      = _clock.ElapsedMilliseconds;
+                bool idleTick = now - _lastFrameAt >= IdleFrameIntervalMs;
+
+                if (dirty || idleTick)
+                {
+                    RenderFrame(rebuildStatic: dirty);
+                    _lastFrameAt = now;
+                    _frameCount++;
+                }
             }
             catch (Exception ex)
             {
                 Logger.Error("OverlayRenderer render error", ex);
             }
+
+            if (!firstSignaled) { _firstFrameDone.Set(); firstSignaled = true; }
 
             AnimState st;
             lock (_lock) { st = _animState; }
@@ -454,7 +592,9 @@ internal sealed class OverlayRenderer : IDisposable
             if (remaining > 0) Thread.Sleep((int)remaining);
         }
 
+        Logger.Debug($"Render loop exited (gen {myGeneration}, running={_renderRunning}, currentGen={_renderGeneration}).");
         _renderRunning = false;
+        if (!firstSignaled) _firstFrameDone.Set();
     }
 
     // ── Input polling ─────────────────────────────────────────────────────
@@ -483,7 +623,9 @@ internal sealed class OverlayRenderer : IDisposable
 
             if (menu is null || animState == AnimState.Hidden || winSize == 0) return;
 
-            Win32.GetCursorPos(out var screenPt);
+            Win32.POINT screenPt;
+            if (TestInputEnabled) screenPt = new Win32.POINT { X = TestCursorX, Y = TestCursorY };
+            else                  Win32.GetCursorPos(out screenPt);
 
             float scale   = App.Config.Current.Appearance.Scale;
             float logical = winSize / dpiScale;
@@ -496,6 +638,13 @@ internal sealed class OverlayRenderer : IDisposable
             float dist    = MathF.Sqrt(dx * dx + dy * dy);
             float innerR  = AppConstants.RingInnerRadius * scale;
             float outerR  = AppConstants.RingOuterRadius * scale;
+
+            if (_clock.ElapsedMilliseconds - _pollHeartbeatAt >= 5000)
+            {
+                _pollHeartbeatAt = _clock.ElapsedMilliseconds;
+                Logger.Debug($"Poll heartbeat: cursor=({screenPt.X},{screenPt.Y}) win=({winLeft},{winTop},{winSize}) local=({localX:F0},{localY:F0}) dist={dist:F0} state={animState} polls={_pollCount} frames={_frameCount}");
+            }
+            _pollCount++;
 
             var   appearance  = App.Config.Current.Appearance;
             int   sliceCount  = appearance.SliceCount;
@@ -559,7 +708,7 @@ internal sealed class OverlayRenderer : IDisposable
                 l3HoverChanged = newL3Hovered != _l3HoveredIndex;
                 if (l3HoverChanged) { _l3HoveredIndex = newL3Hovered; _l3HoverStart = _clock.ElapsedMilliseconds; }
             }
-            if (l3HoverChanged) L3HoveredIndexChanged?.Invoke(newL3Hovered);
+            if (l3HoverChanged) { MarkDirty(); Post(InputKind.L3Hover, newL3Hovered); }
 
             // ── L2 child ring hit test ────────────────────────────────────
             // inChildZone = cursor is between outerR and cOuterR (includes gap before L2 ring)
@@ -591,7 +740,7 @@ internal sealed class OverlayRenderer : IDisposable
                 childHoverChanged = newChildHovered != _childHoveredIndex;
                 if (childHoverChanged) { _childHoveredIndex = newChildHovered; _childHoverStart = _clock.ElapsedMilliseconds; }
             }
-            if (childHoverChanged) ChildHoveredIndexChanged?.Invoke(newChildHovered);
+            if (childHoverChanged) { MarkDirty(); Post(InputKind.ChildHover, newChildHovered); }
 
             // ── Main ring hit test ────────────────────────────────────────
             int  newHovered = -1;
@@ -624,11 +773,12 @@ internal sealed class OverlayRenderer : IDisposable
                 hoverChanged = newHovered != _hoveredIndex;
                 if (hoverChanged) { _hoveredIndex = newHovered; _hoverStart = _clock.ElapsedMilliseconds; }
             }
-            if (hoverChanged && !inChildZone) HoveredIndexChanged?.Invoke(newHovered);
+            if (hoverChanged) MarkDirty();
+            if (hoverChanged && !inChildZone) Post(InputKind.Hover, newHovered);
 
             // ── Click detection ───────────────────────────────────────────
-            bool lmbDown = (Win32.GetAsyncKeyState(0x01) & 0x8000) != 0;
-            bool rmbDown = (Win32.GetAsyncKeyState(0x02) & 0x8000) != 0;
+            bool lmbDown = TestInputEnabled ? TestLmbDown : (Win32.GetAsyncKeyState(0x01) & 0x8000) != 0;
+            bool rmbDown = !TestInputEnabled && (Win32.GetAsyncKeyState(0x02) & 0x8000) != 0;
             bool wasLmb, wasRmb;
             lock (_lock) { wasLmb = _wasLeftPressed; wasRmb = _wasRightPressed; }
 
@@ -637,33 +787,38 @@ internal sealed class OverlayRenderer : IDisposable
 
             if (App.Config.Current.Trigger.VirtualKey != 0x01 && lmbReleased)
             {
+                Logger.Debug($"LMB release at dist={dist:F0} hovered={newHovered} child={newChildHovered} l3={newL3Hovered} center={isCenter} childZone={inChildZone}");
                 // Priority: L3 > L2 > center > L1
                 if (newL3Hovered >= 0)
-                    L3ItemClicked?.Invoke(newL3Hovered);
+                    Post(InputKind.L3Click, newL3Hovered);
                 else if (newChildHovered >= 0 && !inL3Zone)
-                    ChildItemClicked?.Invoke(newChildHovered);
+                    Post(InputKind.ChildClick, newChildHovered);
                 else if (isCenter)
-                    CenterClicked?.Invoke();
+                    Post(InputKind.Center);
                 else if (newHovered >= 0
                          && App.Config.Current.Behavior.SelectionMode == SelectionMode.Click)
-                    ItemClicked?.Invoke(newHovered);
+                    Post(InputKind.Click, newHovered);
                 else if (newHovered < 0 && !isCenter && !inChildZone
                          && App.Config.Current.Behavior.CloseOnClickOutside)
-                    ClickedOutside?.Invoke();
+                    Post(InputKind.Outside);
             }
 
             if (rmbReleased && !isCenter && newHovered < 0 && !inChildZone
                 && App.Config.Current.Behavior.CloseOnClickOutside)
-                ClickedOutside?.Invoke();
+                Post(InputKind.Outside);
 
             lock (_lock) { _wasLeftPressed = lmbDown; _wasRightPressed = rmbDown; }
 
-            // Poll system volume every 200ms — render thread only, no synchronisation needed
+            // Poll system volume every 200ms, and only when something on screen uses it
+            // (volume ring, or the visualizer while media plays). Render thread only.
             long nowMs = _clock.ElapsedMilliseconds;
-            if (nowMs - _volumeUpdateStamp >= 200)
+            bool needVolume = appearance.VolumeRingVisibility != VolumeRingVisibility.Hidden
+                           || (appearance.ShowVisualizer && App.MediaInfo?.IsPlaying == true);
+            if (needVolume && nowMs - _volumeUpdateStamp >= 200)
             {
                 _volumeUpdateStamp = nowMs;
-                _volumeLevel = AeroDial.Core.AudioService.GetMasterVolume();
+                float level = AeroDial.Core.AudioService.GetMasterVolume();
+                if (level != _volumeLevel) { _volumeLevel = level; MarkDirty(); }
             }
 
             CheckDwell(newHovered, newChildHovered, newL3Hovered);
@@ -674,9 +829,14 @@ internal sealed class OverlayRenderer : IDisposable
         }
     }
 
-    // ── Render frame (called from timer tick — renders to DIBSection, flushes via UpdateLayeredWindow)
+    // ── Render frame ──────────────────────────────────────────────────────
+    // Two layers. The ring itself (glow, slices, accent arc, dots, icons, child
+    // rings) is drawn into _staticLayer only when something changed. Every frame
+    // then blits that layer and draws the cheap continuous effects on top (shimmer,
+    // volume arc, center label, now-playing, visualizer) before flushing to DWM.
+    // In the steady open state this turns a full ring redraw into one bitmap copy.
 
-    private void RenderFrame()
+    private void RenderFrame(bool rebuildStatic)
     {
         if (_hwnd == 0) return;
 
@@ -685,7 +845,7 @@ internal sealed class OverlayRenderer : IDisposable
         if (winSize == 0) return;
 
         EnsureDIBSection(winSize);
-        if (_bitmapCanvas is null) return;
+        if (_bitmapCanvas is null || _staticCanvas is null || _staticLayer is null) return;
 
         try
         {
@@ -693,6 +853,7 @@ internal sealed class OverlayRenderer : IDisposable
             float dpiScale;
             int hovered, childHovered, childParentIdx, l3Hovered, l3ParentIdx;
             AnimState state; long animStart; bool hasParent;
+            bool ringsAnimating;
             lock (_lock)
             {
                 menu      = _menu; dpiScale = _dpiScale; hovered = _hoveredIndex;
@@ -715,11 +876,16 @@ internal sealed class OverlayRenderer : IDisposable
                     _l3AnimProgress = ct.EaseOutBack();
                     if (ct >= 1f) _l3Animating = false;
                 }
+                ringsAnimating = state is AnimState.Opening or AnimState.Closing || _childAnimating || _l3Animating;
             }
 
             var canvas = _bitmapCanvas;
-            canvas.Clear(SKColors.Transparent);
-            if (menu is null || state == AnimState.Hidden) { FlushToWindow(); return; }
+            if (menu is null || state == AnimState.Hidden)
+            {
+                canvas.Clear(SKColors.Transparent);
+                FlushToWindow();
+                return;
+            }
 
             bool animated = IsAnimEnabled();
             float t = animated
@@ -735,6 +901,7 @@ internal sealed class OverlayRenderer : IDisposable
             {
                 if (state == AnimState.Closing)
                 {
+                    canvas.Clear(SKColors.Transparent);
                     FlushToWindow(); // transparent frame before callback hides the window
                     lock (_lock) { _animState = AnimState.Hidden; }
                     // RenderLoop checks AnimState.Hidden after each frame and exits the loop
@@ -755,7 +922,7 @@ internal sealed class OverlayRenderer : IDisposable
             var   appearance  = App.Config.Current.Appearance;
             float scale       = appearance.Scale;
             float ringOpacity = Math.Clamp(appearance.RingOpacity, 0f, 1f);
-            float rAlpha      = alpha * ringOpacity; // animation fade × ring opacity — used for all ring elements
+            float rAlpha      = alpha * ringOpacity; // animation fade x ring opacity, used for all ring elements
             float logical     = _currentBitmapSize / dpiScale;
             float cx = logical / 2f, cy = logical / 2f;
             float outerR      = AppConstants.RingOuterRadius * eased * scale;
@@ -765,69 +932,145 @@ internal sealed class OverlayRenderer : IDisposable
             float sliceInnerR = innerR + appearance.RingInnerDetach * scale;
             float iconR       = AppConstants.IconOrbitRadius  * scale;
 
-            canvas.Save();
-            canvas.Scale(dpiScale);
-
             var theme = App.Themes.ActiveTheme;
 
-            int   sliceCount = Math.Clamp(appearance.SliceCount, 4, 12);
+            int   sliceCount = Math.Clamp(appearance.SliceCount, 3, 12);
             int   itemCount  = menu.Items.Count;
             float fullArc    = 360f / sliceCount;
             float gap        = appearance.GapDegrees;
             float sweep      = fullArc - gap;
             float startOff   = -90f - fullArc / 2f;
 
-            // When the hovered parent has an open child ring, its outward glow would bleed
-            // across the small gap into the child-ring band and tint it — by an amount that
-            // varies with the parent's angle. Suppress that parent's outward glow so the
-            // child ring looks identical regardless of which parent opened it.
-            bool parentHasChild = childMenu != null && hovered == childParentIdx;
+            // Gradient shaders are cached by radius. While a ring is animating the radius
+            // changes every frame, which would just churn the cache, so build them transiently.
+            _transientGradients = ringsAnimating;
 
-            // Glow pass (drawn before slices so glow sits behind everything)
-            if (hovered >= 0 && hovered < sliceCount && !parentHasChild)
+            // ── Static layer: the ring geometry ───────────────────────────
+            if (rebuildStatic || !_staticValid)
             {
-                float glowStart = startOff + hovered * fullArc + gap / 2f;
-                DrawSliceGlow(canvas, cx, cy, outerR, sliceInnerR, glowStart, sweep, theme, rAlpha, scale);
+                var sc = _staticCanvas;
+                sc.Clear(SKColors.Transparent);
+                sc.Save();
+                sc.Scale(dpiScale);
+
+                // When the hovered parent has an open child ring, its outward glow would bleed
+                // across the small gap into the child-ring band and tint it, by an amount that
+                // varies with the parent angle. Suppress that parent glow so the child ring
+                // looks identical regardless of which parent opened it.
+                bool parentHasChild = childMenu != null && hovered == childParentIdx;
+
+                // Glow pass (drawn before slices so glow sits behind everything)
+                if (hovered >= 0 && hovered < sliceCount && !parentHasChild)
+                {
+                    float glowStart = startOff + hovered * fullArc + gap / 2f;
+                    DrawSliceGlow(sc, cx, cy, outerR, sliceInnerR, glowStart, sweep, theme, rAlpha, scale);
+                }
+
+                // Main ring slices
+                for (int i = 0; i < sliceCount; i++)
+                {
+                    bool  hov   = i == hovered;
+                    bool  empty = i >= itemCount || menu.Items[i].IsEmptySlot;
+                    float start = startOff + i * fullArc + gap / 2f;
+                    bool  outerGlow = !(hov && parentHasChild); // also suppress the outer accent-arc glow
+                    DrawSlice(sc, cx, cy, outerR, sliceInnerR, start, sweep, theme, hov, rAlpha, scale, empty, outerGlow);
+                }
+
+                // Inner accent arc on the hovered slice (inner edge of slice, not center circle)
+                if (hovered >= 0 && hovered < itemCount)
+                {
+                    float arcStart = startOff + hovered * fullArc + gap / 2f + 2f;
+                    float arcSweep = sweep - 4f;
+                    var   accent   = theme.ToSKColor(theme.AccentColor);
+                    _arcStroke.Style       = SKPaintStyle.Stroke;
+                    _arcStroke.StrokeCap   = SKStrokeCap.Butt;
+                    _arcStroke.StrokeWidth = 2.5f * scale;
+                    _arcStroke.Color       = accent.WithAlpha((byte)(200 * rAlpha));
+                    _arcStroke.MaskFilter  = GetBlur(2f * scale);
+                    _arcPath.Rewind();
+                    _arcPath.ArcTo(
+                        new SKRect(cx - sliceInnerR - 1f, cy - sliceInnerR - 1f, cx + sliceInnerR + 1f, cy + sliceInnerR + 1f),
+                        arcStart, arcSweep, true);
+                    sc.DrawPath(_arcPath, _arcStroke);
+                    _arcStroke.MaskFilter = null;
+                }
+
+                // SubMenu indicator dots on outer rim
+                DrawIndicatorDots(sc, cx, cy, outerR, menu, sliceCount, startOff, fullArc, hovered, theme, rAlpha, scale);
+
+                // Icons
+                {
+                    int labelCount = Math.Min(sliceCount, itemCount);
+                    for (int i = 0; i < labelCount; i++)
+                    {
+                        var   item = menu.Items[i];
+                        if (item.IsEmptySlot) continue;
+                        bool  hov  = i == hovered;
+                        float mid  = startOff + i * fullArc + fullArc / 2f;
+                        float rad  = mid.ToRadians();
+                        float ix   = cx + MathF.Cos(rad) * iconR;
+                        float iy   = cy + MathF.Sin(rad) * iconR;
+
+                        DrawIcon(sc, ix, iy, item, theme, hov, rAlpha, scale);
+                        if (item.ScrollUpAction.HasValue || item.ScrollDownAction.HasValue)
+                            DrawScrollIndicator(sc, cx, cy, iconR, mid, theme, hov, rAlpha, scale);
+                    }
+                }
+
+                // L2 child ring (outer concentric ring for the hovered submenu)
+                bool   hasThinning  = appearance.DynamicRingThinning && l3Menu != null;
+                float  l2Thickness  = hasThinning ? AppConstants.ThinChildRingThickness : AppConstants.ChildRingThickness;
+                float  l1MidAngle   = -90f + childParentIdx * (360f / sliceCount);
+                bool   partialArc   = appearance.PartialArcSubMenu;
+
+                if (childMenu != null && childAnimProg > 0.01f)
+                {
+                    float cAlpha     = Math.Min(childAnimProg, 1f) * rAlpha;
+                    float scaleF     = 0.85f + 0.15f * Math.Min(childAnimProg, 1f);
+                    float baseOuterR = AppConstants.RingOuterRadius * scale;
+
+                    DrawChildRing(sc, cx, cy, baseOuterR, childMenu, childHovered,
+                        theme, cAlpha, scale, l1MidAngle, l2Thickness, partialArc, scaleF);
+                }
+
+                // L3 ring (second outer ring shown when hovering an L2 SubMenu item)
+                if (l3Menu != null && l3AnimProg > 0.01f && childMenu != null)
+                {
+                    float l3Alpha    = Math.Min(l3AnimProg, 1f) * rAlpha;
+                    float scaleF     = 0.85f + 0.15f * Math.Min(l3AnimProg, 1f);
+                    float baseOuterR = AppConstants.RingOuterRadius * scale;
+
+                    // Compute L2 item mid angle for partial-arc centering of L3
+                    float l2MidAngle;
+                    if (partialArc)
+                    {
+                        var (l2Start, l2Seg, _) = GetArcLayout(childMenu.Items.Count, l1MidAngle, true);
+                        l2MidAngle = l2Start + l3ParentIdx * l2Seg + l2Seg / 2f;
+                    }
+                    else
+                    {
+                        float l2Seg = 360f / childMenu.Items.Count;
+                        l2MidAngle = -90f + l3ParentIdx * l2Seg;
+                    }
+
+                    DrawL3Ring(sc, cx, cy, baseOuterR, l2Thickness, l3Menu, l3Hovered,
+                        l2MidAngle, theme, l3Alpha, scale, partialArc, scaleF);
+                }
+
+                sc.Restore();
+                sc.Flush();
+                _staticValid = true;
             }
 
-            // Main ring slices
-            for (int i = 0; i < sliceCount; i++)
-            {
-                bool  hov   = i == hovered;
-                bool  empty = i >= itemCount || menu.Items[i].IsEmptySlot;
-                float start = startOff + i * fullArc + gap / 2f;
-                bool  outerGlow = !(hov && parentHasChild); // also suppress the outer accent-arc glow
-                DrawSlice(canvas, cx, cy, outerR, sliceInnerR, start, sweep, theme, hov, rAlpha, scale, empty, outerGlow);
-            }
+            // ── Per-frame layer: blit the ring, then the continuous effects ──
+            canvas.DrawBitmap(_staticLayer, 0f, 0f, _blitPaint); // Src blend: replaces every pixel, no Clear needed
+            canvas.Save();
+            canvas.Scale(dpiScale);
 
-            // Inner accent arc on the hovered slice (inner edge of slice, not center circle)
-            if (hovered >= 0 && hovered < itemCount)
-            {
-                float arcStart = startOff + hovered * fullArc + gap / 2f + 2f;
-                float arcSweep = sweep - 4f;
-                var   accent   = theme.ToSKColor(theme.AccentColor);
-                _arcStroke.Style       = SKPaintStyle.Stroke;
-                _arcStroke.StrokeCap   = SKStrokeCap.Butt;
-                _arcStroke.StrokeWidth = 2.5f * scale;
-                _arcStroke.Color       = accent.WithAlpha((byte)(200 * rAlpha));
-                _arcStroke.MaskFilter  = GetBlur(2f * scale);
-                _arcPath.Rewind();
-                _arcPath.ArcTo(
-                    new SKRect(cx - sliceInnerR - 1f, cy - sliceInnerR - 1f, cx + sliceInnerR + 1f, cy + sliceInnerR + 1f),
-                    arcStart, arcSweep, true);
-                canvas.DrawPath(_arcPath, _arcStroke);
-                _arcStroke.MaskFilter = null;
-            }
-
-            // Shimmer — rotating dashed arc on outer ring edge
+            // Shimmer: rotating dashed arc on outer ring edge
             DrawShimmer(canvas, cx, cy, outerR, theme, rAlpha, scale);
 
-            // SubMenu indicator dots on outer rim
-            DrawIndicatorDots(canvas, cx, cy, outerR, menu, sliceCount, startOff, fullArc, hovered, theme, rAlpha, scale);
-
             // Smooth volume animation: lerp displayed level toward polled level each frame.
-            // At ~120 fps the lerp factor 0.10 gives a ~80ms half-life — fast enough to feel
-            // instantaneous for scroll-wheel adjustments, smooth enough to avoid the 200ms snap.
             {
                 float volDiff = _volumeLevel - _volumeDisplayLevel;
                 _volumeDisplayLevel = MathF.Abs(volDiff) < 0.001f
@@ -835,67 +1078,8 @@ internal sealed class OverlayRenderer : IDisposable
                     : _volumeDisplayLevel + volDiff * 0.10f;
             }
 
-            // Volume level arc — persistent thin arc just outside the ring showing current volume %
+            // Volume level arc: persistent thin arc just outside the ring showing current volume %
             DrawVolumeArc(canvas, cx, cy, AppConstants.RingOuterRadius * eased * scale, theme, rAlpha, scale);
-
-            // Icons
-            {
-                int labelCount = Math.Min(sliceCount, itemCount);
-                for (int i = 0; i < labelCount; i++)
-                {
-                    var   item = menu.Items[i];
-                    if (item.IsEmptySlot) continue;
-                    bool  hov  = i == hovered;
-                    float mid  = startOff + i * fullArc + fullArc / 2f;
-                    float rad  = mid.ToRadians();
-                    float ix   = cx + MathF.Cos(rad) * iconR;
-                    float iy   = cy + MathF.Sin(rad) * iconR;
-
-                    DrawIcon(canvas, ix, iy, item, theme, hov, rAlpha, scale);
-                    if (item.ScrollUpAction.HasValue || item.ScrollDownAction.HasValue)
-                        DrawScrollIndicator(canvas, cx, cy, iconR, mid, theme, hov, rAlpha, scale);
-                }
-            }
-
-            // L2 child ring (outer concentric ring for the hovered submenu)
-            bool   hasThinning  = appearance.DynamicRingThinning && l3Menu != null;
-            float  l2Thickness  = hasThinning ? AppConstants.ThinChildRingThickness : AppConstants.ChildRingThickness;
-            float  l1MidAngle   = -90f + childParentIdx * (360f / sliceCount);
-            bool   partialArc   = appearance.PartialArcSubMenu;
-
-            if (childMenu != null && childAnimProg > 0.01f)
-            {
-                float cAlpha     = Math.Min(childAnimProg, 1f) * rAlpha;
-                float scaleF     = 0.85f + 0.15f * Math.Min(childAnimProg, 1f);
-                float baseOuterR = AppConstants.RingOuterRadius * scale;
-
-                DrawChildRing(canvas, cx, cy, baseOuterR, childMenu, childHovered,
-                    theme, cAlpha, scale, l1MidAngle, l2Thickness, partialArc, scaleF);
-            }
-
-            // L3 ring (second outer ring shown when hovering an L2 SubMenu item)
-            if (l3Menu != null && l3AnimProg > 0.01f && childMenu != null)
-            {
-                float l3Alpha    = Math.Min(l3AnimProg, 1f) * rAlpha;
-                float scaleF     = 0.85f + 0.15f * Math.Min(l3AnimProg, 1f);
-                float baseOuterR = AppConstants.RingOuterRadius * scale;
-
-                // Compute L2 item's mid angle for partial-arc centering of L3
-                float l2MidAngle;
-                if (partialArc)
-                {
-                    var (l2Start, l2Seg, _) = GetArcLayout(childMenu.Items.Count, l1MidAngle, true);
-                    l2MidAngle = l2Start + l3ParentIdx * l2Seg + l2Seg / 2f;
-                }
-                else
-                {
-                    float l2Seg = 360f / childMenu.Items.Count;
-                    l2MidAngle = -90f + l3ParentIdx * l2Seg;
-                }
-
-                DrawL3Ring(canvas, cx, cy, baseOuterR, l2Thickness, l3Menu, l3Hovered,
-                    l2MidAngle, theme, l3Alpha, scale, partialArc, scaleF);
-            }
 
             // Center circle + label
             string centerLabel;
@@ -1030,14 +1214,28 @@ internal sealed class OverlayRenderer : IDisposable
 
         // Radial gradient spanning the ring's own inner→outer radius.
         // All rings (L1, L2, L3) use this path — each gets a gradient matched to its own radii.
-        // The shader is cached (keyed on radius + colors) so it isn't rebuilt every frame.
+        // The shader is cached (keyed on radius + colors) so it isn't rebuilt every frame,
+        // except while a ring is animating: then the radius differs every frame and a
+        // throwaway shader is cheaper than churning the cache.
         float gradPos = (outerR > 0f ? innerR / outerR : 0f).Clamp(0f, 0.95f);
-        _fill.Shader = GetGradient(cx, cy, outerR, innerC.WithAlpha(ia), outerC.WithAlpha(oa), gradPos);
-        _fill.Color  = SKColors.White; // opaque: alpha is baked into the gradient stops, so a
-                                       // leftover paint alpha (e.g. from DrawIndicatorDots) must
-                                       // not attenuate the shader.
-        canvas.DrawPath(_path, _fill);
-        _fill.Shader = null;
+        _fill.Color = SKColors.White; // opaque: alpha is baked into the gradient stops, so a
+                                      // leftover paint alpha (e.g. from DrawIndicatorDots) must
+                                      // not attenuate the shader.
+        if (_transientGradients)
+        {
+            using var sh = SKShader.CreateRadialGradient(
+                new SKPoint(cx, cy), outerR,
+                [innerC.WithAlpha(ia), outerC.WithAlpha(oa)], [gradPos, 1.0f], SKShaderTileMode.Clamp);
+            _fill.Shader = sh;
+            canvas.DrawPath(_path, _fill);
+            _fill.Shader = null;
+        }
+        else
+        {
+            _fill.Shader = GetGradient(cx, cy, outerR, innerC.WithAlpha(ia), outerC.WithAlpha(oa), gradPos);
+            canvas.DrawPath(_path, _fill);
+            _fill.Shader = null;
+        }
 
         // Border stroke — minimum 0.5px so arcs never collapse to sub-pixel jaggies
         _stroke.Color = theme.ToSKColor(hov && !empty ? theme.SliceStrokeHover : theme.SliceStroke)
@@ -1485,7 +1683,7 @@ internal sealed class OverlayRenderer : IDisposable
         {
             if (now - l3HoverStart >= dwell)
             {
-                L3ItemClicked?.Invoke(l3Hov);
+                Post(InputKind.L3Click, l3Hov);
                 lock (_lock) { _l3HoverStart = long.MaxValue; }
             }
         }
@@ -1496,7 +1694,7 @@ internal sealed class OverlayRenderer : IDisposable
         {
             if (now - childHoverStart >= dwell)
             {
-                ChildItemClicked?.Invoke(childHov);
+                Post(InputKind.ChildClick, childHov);
                 lock (_lock) { _childHoverStart = long.MaxValue; }
             }
         }
@@ -1507,7 +1705,7 @@ internal sealed class OverlayRenderer : IDisposable
         {
             if (now - hoverStart >= dwell)
             {
-                ItemClicked?.Invoke(hov);
+                Post(InputKind.Click, hov);
                 lock (_lock) { _hoverStart = long.MaxValue; }
             }
         }
@@ -1578,6 +1776,7 @@ internal sealed class OverlayRenderer : IDisposable
 
         _fill.Dispose(); _stroke.Dispose(); _text.Dispose();
         _glowFill.Dispose(); _arcStroke.Dispose(); _iconPaint.Dispose(); _shimmerPaint.Dispose();
+        _blitPaint.Dispose();
         _path.Dispose(); _arcPath.Dispose();
 
         foreach (var m in _blurCache.Values) m.Dispose(); _blurCache.Clear();
@@ -1586,6 +1785,7 @@ internal sealed class OverlayRenderer : IDisposable
         _shimmerDash?.Dispose();
         _cachedTypeface?.Dispose();
         ReleaseDIBSection();
+        _firstFrameDone.Dispose();
     }
 }
 
@@ -1593,9 +1793,26 @@ internal enum AnimState { Hidden, Opening, Open, Closing }
 
 internal static class SystemParameters
 {
+    // SystemParametersInfo is a user32 syscall; it was being issued every frame.
+    // The setting only changes when the user edits Windows settings, so cache it briefly.
+    private static bool _menuAnimation = true;
+    private static long _menuAnimationStamp = long.MinValue / 2;
+    private const  long CacheMs = 1000;
+
     public static bool MenuAnimation
     {
-        get { bool r = true; SystemParametersInfo(0x1002, 0, ref r, 0); return r; }
+        get
+        {
+            long now = Environment.TickCount64;
+            if (now - _menuAnimationStamp >= CacheMs)
+            {
+                bool r = true;
+                SystemParametersInfo(0x1002, 0, ref r, 0);
+                _menuAnimation = r;
+                _menuAnimationStamp = now;
+            }
+            return _menuAnimation;
+        }
     }
     [DllImport("user32.dll")]
     private static extern bool SystemParametersInfo(uint a, uint b, ref bool c, uint d);

@@ -31,15 +31,36 @@ internal sealed class OverlayController : IDisposable
     private volatile RadialMenuConfig? _activeTasksMenu;
     private volatile RadialMenuConfig? _clipboardMenu;
 
+    // Active Tasks is only built when some menu actually references it, and always on a
+    // background thread: EnumWindows + Process.MainModule per window used to run
+    // synchronously between the trigger and the first pixel.
+    private bool _needsActiveTasks;
+    private int  _activeTasksBuildGen;
+
+    // pid -> (process name, exe path). MainModule is slow and throws for elevated
+    // processes; resolve each process once per session.
+    private static readonly Dictionary<uint, (string Name, string Icon)> s_exeIconByPid = new();
+
     // HWND of the window that had focus when the overlay opened.
     // Restored on close so games and fullscreen apps recapture their mouse cursor.
     private nint _prevForegroundHwnd;
+
+    // All state above is owned by the UI thread: the renderer posts input events to it
+    // (see OverlayRenderer.Post) and HookService callbacks marshal via DispatcherQueue.
 
     public OverlayController()
     {
         App.Hooks.TriggerActivated += OnTriggerActivated;
         App.Hooks.TriggerReleased  += OnTriggerReleased;
         App.Hooks.ScrollWheeled    += OnScrollWheeled;
+        App.Config.ConfigChanged   += RefreshMenuFlags;
+        RefreshMenuFlags();
+    }
+
+    private void RefreshMenuFlags()
+    {
+        _needsActiveTasks = App.Config.Current.Menus.Any(m =>
+            m.Items.Any(i => i.SubMenuId == AppConstants.ActiveTasksMenuId));
     }
 
     // ── Trigger ───────────────────────────────────────────────────────────
@@ -74,51 +95,28 @@ internal sealed class OverlayController : IDisposable
         {
             if (!_isOpen) return;
 
-            var bCfg = App.Config.Current.Behavior;
+            var  bCfg     = App.Config.Current.Behavior;
+            bool holdMode = App.Config.Current.Trigger.HoldMode;
+            bool onRelease = bCfg.SelectionMode == SelectionMode.Flick || bCfg.LaunchOnRelease;
 
-            // Check L3 first
-            if (_l3HoveredIndex >= 0 && _l3Menu is not null
-                && _l3HoveredIndex < _l3Menu.Items.Count)
+            // Pick the item to run: L3 > L2 > L1. Submenu slices never execute on release.
+            MenuItemConfig? toRun = null;
+            if (onRelease)
             {
-                if (bCfg.SelectionMode == SelectionMode.Flick || bCfg.LaunchOnRelease)
-                {
-                    ExecuteItem(_l3Menu.Items[_l3HoveredIndex]);
-                    if (App.Config.Current.Trigger.HoldMode) Close();
-                    return;
-                }
+                if (_l3HoveredIndex >= 0 && _l3Menu is not null && _l3HoveredIndex < _l3Menu.Items.Count)
+                    toRun = _l3Menu.Items[_l3HoveredIndex];
+                else if (_childHoveredIndex >= 0 && _childMenu is not null && _childHoveredIndex < _childMenu.Items.Count)
+                    toRun = _childMenu.Items[_childHoveredIndex];
+                else if (_hoveredIndex >= 0 && _currentMenu is not null && _hoveredIndex < _currentMenu.Items.Count)
+                    toRun = _currentMenu.Items[_hoveredIndex];
+
+                if (toRun is not null && toRun.ActionType == ActionType.SubMenu) toRun = null;
             }
 
-            // Check L2 child ring
-            if (_childHoveredIndex >= 0 && _childMenu is not null
-                && _childHoveredIndex < _childMenu.Items.Count)
-            {
-                if (bCfg.SelectionMode == SelectionMode.Flick || bCfg.LaunchOnRelease)
-                {
-                    ExecuteItem(_childMenu.Items[_childHoveredIndex]);
-                    if (App.Config.Current.Trigger.HoldMode) Close();
-                    return;
-                }
-            }
-
-            if (bCfg.SelectionMode == SelectionMode.Flick)
-            {
-                if (_hoveredIndex >= 0 && _currentMenu is not null
-                    && _hoveredIndex < _currentMenu.Items.Count)
-                {
-                    var item = _currentMenu.Items[_hoveredIndex];
-                    if (item.ActionType != ActionType.SubMenu)
-                        ExecuteItem(item);
-                }
-            }
-            else if (bCfg.LaunchOnRelease && _hoveredIndex >= 0 && _currentMenu is not null)
-            {
-                var item = _currentMenu.Items[_hoveredIndex];
-                if (item.ActionType != ActionType.SubMenu)
-                    ExecuteItem(item);
-            }
-
-            if (App.Config.Current.Trigger.HoldMode)
-                Close();
+            // Close first, then run: the ring collapses immediately and the previous
+            // foreground window is restored before any keystrokes or launches happen.
+            if (holdMode) Close();
+            if (toRun is not null) ExecuteItem(toRun);
         });
     }
 
@@ -132,9 +130,8 @@ internal sealed class OverlayController : IDisposable
         // to know they've regained focus and should re-engage mouse capture).
         _prevForegroundHwnd = Win32.GetForegroundWindow();
 
-        // Rebuild dynamic menus synchronously (active tasks) and async (clipboard)
-        try { _activeTasksMenu = BuildActiveTasksMenu(); }
-        catch (Exception ex) { Logger.Warn("BuildActiveTasksMenu failed", ex); }
+        // Rebuild dynamic menus in the background. Nothing here may delay the first frame.
+        if (_needsActiveTasks) StartActiveTasksBuild();
         _ = BuildClipboardHistoryMenuAsync().ContinueWith(t =>
         {
             if (!t.IsFaulted) _clipboardMenu = t.Result;
@@ -143,6 +140,7 @@ internal sealed class OverlayController : IDisposable
 
         string? processName = GetForegroundProcessName();
         _currentMenu       = App.Config.GetActiveMenu(processName);
+        PrefetchSubmenuIcons(_currentMenu);
         _menuStack.Clear();
         _hoveredIndex      = -1;
         _childMenu         = null;
@@ -205,6 +203,7 @@ internal sealed class OverlayController : IDisposable
 
     private void OnHoveredIndexChanged(int index)
     {
+        if (!_isOpen) return; // stale event posted before Close()
         _hoveredIndex = index;
 
         if (index < 0 || _currentMenu is null || index >= _currentMenu.Items.Count)
@@ -256,7 +255,7 @@ internal sealed class OverlayController : IDisposable
 
     private void OnItemClicked(int index)
     {
-        if (_currentMenu is null || index < 0 || index >= _currentMenu.Items.Count) return;
+        if (!_isOpen || _currentMenu is null || index < 0 || index >= _currentMenu.Items.Count) return;
         var item = _currentMenu.Items[index];
 
         if (item.ActionType == ActionType.SubMenu)
@@ -278,6 +277,7 @@ internal sealed class OverlayController : IDisposable
 
     private void OnChildHoveredIndexChanged(int idx)
     {
+        if (!_isOpen) return;
         _childHoveredIndex = idx;
 
         if (idx < 0 || _childMenu is null || idx >= _childMenu.Items.Count)
@@ -308,13 +308,13 @@ internal sealed class OverlayController : IDisposable
 
     private void OnChildItemClicked(int index)
     {
-        if (_childMenu is null || index < 0 || index >= _childMenu.Items.Count) return;
+        if (!_isOpen || _childMenu is null || index < 0 || index >= _childMenu.Items.Count) return;
         ExecuteItem(_childMenu.Items[index]);
     }
 
     private void OnL3ItemClicked(int index)
     {
-        if (_l3Menu is null || index < 0 || index >= _l3Menu.Items.Count) return;
+        if (!_isOpen || _l3Menu is null || index < 0 || index >= _l3Menu.Items.Count) return;
         ExecuteItem(_l3Menu.Items[index]);
     }
 
@@ -322,6 +322,7 @@ internal sealed class OverlayController : IDisposable
     {
         if (item.ActionType == ActionType.SubMenu && item.SubMenuId is not null)
         {
+            if (!_isOpen) return;
             var sub = ResolveSubMenu(item.SubMenuId);
             if (sub is not null)
             {
@@ -333,10 +334,13 @@ internal sealed class OverlayController : IDisposable
             }
         }
 
-        App.Dispatcher.Execute(item);
-
+        // Close BEFORE executing. Close() hides the ring and restores the previous
+        // foreground window synchronously; the action then runs (shell launches go
+        // to a threadpool thread inside the dispatcher) without holding the ring open.
         if (App.Config.Current.Behavior.CloseOnActionExecuted)
             Close();
+
+        App.Dispatcher.Execute(item);
     }
 
     // ── Scroll wheel ──────────────────────────────────────────────────────
@@ -371,6 +375,7 @@ internal sealed class OverlayController : IDisposable
 
     public void NavigateBack()
     {
+        if (!_isOpen) return;
         // Dismiss L3 first if open
         if (_l3Menu != null)
         {
@@ -411,14 +416,78 @@ internal sealed class OverlayController : IDisposable
         return App.Config.GetMenu(subMenuId);
     }
 
+    /// <summary>Builds the Active Apps menu on a threadpool thread, extracts its exe icons
+    /// there too, then swaps it into any ring currently showing the list.</summary>
+    private void StartActiveTasksBuild()
+    {
+        int gen = Interlocked.Increment(ref _activeTasksBuildGen);
+        _ = Task.Run(() =>
+        {
+            RadialMenuConfig menu;
+            try { menu = BuildActiveTasksMenu(); }
+            catch (Exception ex) { Logger.Warn("BuildActiveTasksMenu failed", ex); return; }
+
+            // Shell icon extraction happens here, never inside a render frame.
+            IconRegistry.Prefetch(menu.Items.Select(i => i.Icon), App.Themes.ActiveTheme.IconStrokeScale);
+
+            if (gen != _activeTasksBuildGen) return; // a newer open superseded this build
+            _activeTasksMenu = menu;
+            App.Tray.DispatcherQueue.TryEnqueue(() => OnActiveTasksReady(menu));
+        });
+    }
+
+    // UI thread. If the user already hovered into Active Apps while it was building, the
+    // ring is showing the previous list (or an empty placeholder): swap in the fresh one in
+    // place, without restarting the pop-out animation.
+    private void OnActiveTasksReady(RadialMenuConfig menu)
+    {
+        if (!_isOpen) return;
+        if (_childMenu?.Id == AppConstants.ActiveTasksMenuId)
+        {
+            _childMenu         = menu;
+            _childHoveredIndex = -1;
+            _l3Menu = null; _l3ParentIndex = -1; _l3HoveredIndex = -1;
+            _window?.HideL3Menu();
+            _window?.ReplaceChildMenu(menu);
+        }
+        else if (_currentMenu?.Id == AppConstants.ActiveTasksMenuId)
+        {
+            _currentMenu  = menu;
+            _hoveredIndex = -1;
+            _window?.ReplaceMenu(menu);
+        }
+    }
+
+    /// <summary>Warms the icon cache for every static submenu the current menu can open,
+    /// so the first hover into a child ring does not stall on icon decoding.</summary>
+    private static void PrefetchSubmenuIcons(RadialMenuConfig menu)
+    {
+        var keys = new List<string?>();
+        foreach (var item in menu.Items)
+        {
+            if (item.ActionType != ActionType.SubMenu || item.SubMenuId is null) continue;
+            var sub = App.Config.GetMenu(item.SubMenuId);
+            if (sub is null) continue;
+            foreach (var child in sub.Items) keys.Add(child.Icon);
+        }
+        if (keys.Count == 0) return;
+        float strokeScale = App.Themes.ActiveTheme.IconStrokeScale;
+        _ = Task.Run(() => IconRegistry.Prefetch(keys, strokeScale));
+    }
+
     private static RadialMenuConfig BuildActiveTasksMenu()
     {
-        var items = new List<MenuItemConfig>();
+        // Pass 1: enumerate cheaply (no process lookups) and cap the list first.
+        // EnumWindows returns windows front-to-back (most-recent first).
+        // Cap at 16 so slices stay wide enough to read even on a full circle.
+        const int MaxActiveTasks = 16;
+        var windows = new List<(nint Hwnd, string Title)>();
 
         Win32.EnumWindows((hwnd, _) =>
         {
             try
             {
+                if (windows.Count >= MaxActiveTasks) return false; // stop enumerating
                 if (!Win32.IsWindowVisible(hwnd)) return true;
 
                 // Skip cloaked windows (e.g. UWP apps backgrounded by the shell)
@@ -444,40 +513,28 @@ internal sealed class OverlayController : IDisposable
                 bool appWin   = (exStyle & Win32.WS_EX_APPWINDOW)  != 0;
                 if (toolWin && !appWin) return true;
 
-                // Try to resolve the process exe for a per-app icon.
-                // Falls back to "apps" for elevated or protected processes.
-                string icon = "apps";
-                try
-                {
-                    Win32.GetWindowThreadProcessId(hwnd, out uint pid);
-                    // Dispose Process to avoid handle leak — MainModule is read immediately
-                    using var proc = Process.GetProcessById((int)pid);
-                    var exePath = proc.MainModule?.FileName;
-                    if (!string.IsNullOrEmpty(exePath)) icon = exePath;
-                }
-                catch { /* protected / elevated process — use fallback icon */ }
-
-                items.Add(new MenuItemConfig
-                {
-                    Label        = title.Length > 30 ? string.Concat(title.AsSpan(0, 30), "…") : title,
-                    Icon         = icon,
-                    ActionType   = ActionType.FocusWindow,
-                    WindowHandle = hwnd,
-                });
+                windows.Add((hwnd, title));
             }
             catch (Exception ex)
             {
                 Logger.Debug($"BuildActiveTasksMenu: skipped hwnd 0x{hwnd:X} — {ex.Message}");
             }
 
-            return true; // always continue enumeration
+            return true; // continue enumeration
         }, 0);
 
-        // EnumWindows returns windows front-to-back (most-recent first).
-        // Cap at 16 so slices stay wide enough to read even on a full circle.
-        const int MaxActiveTasks = 16;
-        if (items.Count > MaxActiveTasks)
-            items = items.GetRange(0, MaxActiveTasks);
+        // Pass 2: resolve per-app icons for the capped list only.
+        var items = new List<MenuItemConfig>(windows.Count);
+        foreach (var (hwnd, title) in windows)
+        {
+            items.Add(new MenuItemConfig
+            {
+                Label        = title.Length > 30 ? string.Concat(title.AsSpan(0, 30), "…") : title,
+                Icon         = ResolveExeIcon(hwnd),
+                ActionType   = ActionType.FocusWindow,
+                WindowHandle = hwnd,
+            });
+        }
 
         return new RadialMenuConfig
         {
@@ -485,6 +542,34 @@ internal sealed class OverlayController : IDisposable
             Name  = "Active Apps",
             Items = items,
         };
+    }
+
+    /// <summary>Exe path for the window's process (used as its icon key), or "apps" for
+    /// elevated / protected processes. Cached per pid for the session, validated by name.</summary>
+    private static string ResolveExeIcon(nint hwnd)
+    {
+        try
+        {
+            Win32.GetWindowThreadProcessId(hwnd, out uint pid);
+            using var proc = Process.GetProcessById((int)pid);
+            string name = proc.ProcessName; // cheap; works for elevated processes too
+
+            lock (s_exeIconByPid)
+                if (s_exeIconByPid.TryGetValue(pid, out var cached) && cached.Name == name)
+                    return cached.Icon;
+
+            string icon = "apps";
+            try
+            {
+                var exePath = proc.MainModule?.FileName; // slow; throws for elevated processes
+                if (!string.IsNullOrEmpty(exePath)) icon = exePath;
+            }
+            catch { /* protected / elevated process — fallback icon, and remember that */ }
+
+            lock (s_exeIconByPid) s_exeIconByPid[pid] = (name, icon);
+            return icon;
+        }
+        catch { return "apps"; }
     }
 
     private static async Task<RadialMenuConfig> BuildClipboardHistoryMenuAsync()
@@ -553,6 +638,7 @@ internal sealed class OverlayController : IDisposable
         App.Hooks.TriggerActivated -= OnTriggerActivated;
         App.Hooks.TriggerReleased  -= OnTriggerReleased;
         App.Hooks.ScrollWheeled    -= OnScrollWheeled;
+        App.Config.ConfigChanged   -= RefreshMenuFlags;
         _window?.Dispose();
     }
 }

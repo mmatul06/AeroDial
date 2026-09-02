@@ -170,6 +170,20 @@ public sealed class SettingsWindow : Window
 
     // ── Navigation ────────────────────────────────────────────────────────
 
+    /// <summary>All navigation tags in sidebar order (used by the self-test to walk every page).</summary>
+    internal static readonly string[] PageTags =
+        ["trigger", "appearance", "behavior", "dynamic", "menus", "profiles", "themes", "theme_editor", "advanced", "about"];
+
+    /// <summary>Current window instance, if open (self-test only).</summary>
+    internal static SettingsWindow? Instance => _instance;
+
+    /// <summary>Selects a page as if the user clicked it in the sidebar.</summary>
+    internal void NavigateTo(string tag)
+    {
+        for (int i = 0; i < _navList.Items.Count; i++)
+            if (_navList.Items[i] is ListViewItem li && (string?)li.Tag == tag) { _navList.SelectedIndex = i; return; }
+    }
+
     private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_navList.SelectedItem is ListViewItem item && item.Tag is string tag)
@@ -199,10 +213,19 @@ public sealed class SettingsWindow : Window
 
     // ── Window proc — X hides to tray, minimize works normally ───────────
 
-    private const uint WM_CLOSE = 0x0010;
+    private const uint WM_CLOSE     = 0x0010;
+    private const uint WM_NCDESTROY = 0x0082;
 
     private void InstallWndProc()
     {
+        // The subclass state is static. If a previous window is somehow still subclassed,
+        // installing again would chain the WndProc to itself and recurse until the stack
+        // overflows, so refuse rather than risk it.
+        if (_prevWndProc != 0)
+        {
+            Logger.Warn("SettingsWindow: WndProc already installed; skipping subclass.");
+            return;
+        }
         _wndProcDelegate = SettingsWndProc;
         _prevWndProc = Win32.SetWindowLongPtrW(
             WindowHandle, Win32.GWLP_WNDPROC,
@@ -217,6 +240,15 @@ public sealed class SettingsWindow : Window
             // The window object is reused; ShowOrActivate() restores it via SW_RESTORE.
             Win32.ShowWindow(hWnd, Win32.SW_HIDE);
             return 0;
+        }
+        if (msg == WM_NCDESTROY)
+        {
+            // Window really is going away: restore the original WndProc and clear the
+            // static state so a future SettingsWindow can subclass its own HWND cleanly.
+            nint prev = _prevWndProc;
+            _prevWndProc = 0;
+            Win32.SetWindowLongPtrW(hWnd, Win32.GWLP_WNDPROC, prev);
+            return Win32.CallWindowProcW(prev, hWnd, msg, wParam, lParam);
         }
         // SC_MINIMIZE passes through unmodified — window minimizes to taskbar normally.
         return Win32.CallWindowProcW(_prevWndProc, hWnd, msg, wParam, lParam);

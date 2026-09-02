@@ -13,7 +13,11 @@ internal sealed class ActionDispatcher
 {
     // ── Entry point ───────────────────────────────────────────────────────
 
-    /// <summary>Execute the action defined by a menu item. Fire-and-forget safe.</summary>
+    /// <summary>Execute the action defined by a menu item. Fire-and-forget safe.
+    /// Anything that goes through the shell (process launch, URL, script) runs on a
+    /// threadpool thread: ShellExecuteEx can block for seconds on a cold-start app or a
+    /// UAC prompt, and the caller is the overlay's UI thread, which must return at once
+    /// so the ring's close animation can play.</summary>
     public void Execute(MenuItemConfig item)
     {
         try
@@ -22,11 +26,11 @@ internal sealed class ActionDispatcher
 
             switch (item.ActionType)
             {
-                case ActionType.LaunchApp:      LaunchApp(item);     break;
-                case ActionType.OpenUrl:        OpenUrl(item);       break;
+                case ActionType.LaunchApp:      RunOffThread(item, LaunchApp); break;
+                case ActionType.OpenUrl:        RunOffThread(item, OpenUrl);   break;
+                case ActionType.RunScript:      RunOffThread(item, RunScript); break;
                 case ActionType.KeyCombo:       SendKeyCombo(item);  break;
                 case ActionType.Media:          SendMedia(item);     break;
-                case ActionType.RunScript:      RunScript(item);     break;
                 case ActionType.PasteClipboard: PasteClip(item);    break;
                 case ActionType.OpenSettings:   OpenSettings();      break;
                 case ActionType.FocusWindow:    FocusWindow(item);   break;
@@ -40,9 +44,21 @@ internal sealed class ActionDispatcher
         }
         catch (Exception ex)
         {
-            Logger.Error($"Action execution failed for '{item.Label}'", ex);
-            App.Tray.ShowBalloon($"Couldn't run \"{item.Label}\"", ex.Message);
+            ReportFailure(item, ex);
         }
+    }
+
+    private static void RunOffThread(MenuItemConfig item, Action<MenuItemConfig> work)
+        => _ = Task.Run(() =>
+        {
+            try { work(item); }
+            catch (Exception ex) { ReportFailure(item, ex); }
+        });
+
+    private static void ReportFailure(MenuItemConfig item, Exception ex)
+    {
+        Logger.Error($"Action execution failed for '{item.Label}'", ex);
+        App.Tray.ShowBalloon($"Couldn't run \"{item.Label}\"", ex.Message);
     }
 
     // ── Action implementations ────────────────────────────────────────────

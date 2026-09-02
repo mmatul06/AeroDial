@@ -4,6 +4,7 @@
 // and editable by power users.
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using AeroDial.Core;
 
@@ -41,13 +42,28 @@ internal sealed class ConfigService
             try
             {
                 var json = await File.ReadAllTextAsync(AppConstants.ConfigPath);
-                config = JsonSerializer.Deserialize<AeroDialConfig>(json, s_jsonOptions)
-                         ?? new AeroDialConfig();
+                var root = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions
+                {
+                    CommentHandling     = JsonCommentHandling.Skip,
+                    AllowTrailingCommas = true,
+                }) as JsonObject ?? throw new JsonException("config.json root is not an object");
+
+                int fromVersion = ConfigMigrator.Migrate(root);
+                if (fromVersion < ConfigMigrator.CurrentVersion)
+                    Logger.Info($"Config migrated from v{fromVersion} to v{ConfigMigrator.CurrentVersion}.");
+
+                config = root.Deserialize<AeroDialConfig>(s_jsonOptions) ?? new AeroDialConfig();
                 Logger.Info($"Config loaded from {AppConstants.ConfigPath}");
             }
             catch (Exception ex)
             {
-                Logger.Error("Failed to parse config.json — using defaults", ex);
+                // Never silently overwrite a file we couldn't read: keep it for recovery.
+                var corruptPath = Path.Combine(AppConstants.AppDataDir,
+                    $"config.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+                try { File.Move(AppConstants.ConfigPath, corruptPath, overwrite: true); }
+                catch (Exception moveEx) { Logger.Warn("Could not set aside corrupt config", moveEx); }
+
+                Logger.Error($"Failed to parse config.json — using defaults. Original kept at {corruptPath}", ex);
                 config = new AeroDialConfig();
             }
         }
@@ -73,6 +89,11 @@ internal sealed class ConfigService
             // never corrupts the config.
             var tmpPath = AppConstants.ConfigPath + ".tmp";
             await File.WriteAllTextAsync(tmpPath, json);
+
+            // Keep the previous good file as config.json.bak before replacing it.
+            if (File.Exists(AppConstants.ConfigPath))
+                File.Copy(AppConstants.ConfigPath, AppConstants.ConfigBackupPath, overwrite: true);
+
             File.Move(tmpPath, AppConstants.ConfigPath, overwrite: true);
             Logger.Info("Config saved.");
         }

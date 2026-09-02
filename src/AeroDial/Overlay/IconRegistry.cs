@@ -18,6 +18,13 @@ internal static class IconRegistry
     private static readonly Dictionary<string, SKBitmap?> _cache = new();
     private static readonly object _lock = new();
 
+    // Bitmaps removed from the cache are not disposed immediately: another thread (the
+    // overlay render thread, or the settings ring preview on the UI thread) may be in the
+    // middle of DrawBitmap with one. They are parked here and freed by DrainRetired() once
+    // a grace period has passed — no draw call holds a bitmap anywhere near that long.
+    private static readonly List<(SKBitmap Bitmap, long RetiredAt)> _retired = new();
+    private const long RetireGraceMs = 2000;
+
     // Applied by W() when drawing built-in icons; set/reset inside DrawBuiltIn under _lock.
     private static float _strokeScale = 1f;
 
@@ -29,33 +36,63 @@ internal static class IconRegistry
     public static SKBitmap? Get(string key, float strokeScale = 1f)
     {
         if (string.IsNullOrWhiteSpace(key)) return null;
+
+        // Built-in icons are keyed with a scale suffix so different scales are cached separately.
+        // File-based icons (exe/png) are not stroke-drawn, so scale doesn't apply to them.
+        bool isBuiltIn = !Path.IsPathRooted(key);
+        string cacheKey = isBuiltIn && strokeScale != 1f
+            ? $"{key}@{strokeScale:F2}" : key;
+
         lock (_lock)
         {
-            // Built-in icons are keyed with a scale suffix so different scales are cached separately.
-            // File-based icons (exe/png) are not stroke-drawn, so scale doesn't apply to them.
-            bool isBuiltIn = !Path.IsPathRooted(key);
-            string cacheKey = isBuiltIn && strokeScale != 1f
-                ? $"{key}@{strokeScale:F2}" : key;
-
             if (_cache.TryGetValue(cacheKey, out var cached)) return cached;
+        }
 
-            // Evict file-based entries when cache grows large
-            if (_cache.Count >= MaxFileCacheEntries)
-                EvictFileEntries();
+        // Load outside the lock: exe icon extraction is shell I/O and must not stall a
+        // render thread that only wants an already-cached bitmap.
+        var bmp = isBuiltIn ? LoadBuiltInLocked(key, strokeScale) : Load(key, strokeScale);
 
-            var bmp = Load(key, strokeScale);
+        lock (_lock)
+        {
+            if (_cache.TryGetValue(cacheKey, out var raced))
+            {
+                // Another thread loaded it first — keep theirs, retire ours.
+                if (bmp is not null && !ReferenceEquals(bmp, raced)) Retire(bmp);
+                return raced;
+            }
+            if (_cache.Count >= MaxFileCacheEntries) EvictFileEntries();
             _cache[cacheKey] = bmp;
             return bmp;
         }
     }
 
-    /// <summary>Removes all absolute-path (exe/file) cache entries, keeping built-in named icons.</summary>
+    // Built-in drawing uses the shared _strokeScale field, so it must run under the lock.
+    private static SKBitmap? LoadBuiltInLocked(string key, float strokeScale)
+    {
+        lock (_lock) return Load(key, strokeScale);
+    }
+
+    /// <summary>Loads (and caches) every icon in <paramref name="keys"/>. Call from a
+    /// background thread before a menu is shown so the render thread never pays for
+    /// shell icon extraction inside a frame.</summary>
+    public static void Prefetch(IEnumerable<string?> keys, float strokeScale = 1f)
+    {
+        foreach (var key in keys)
+        {
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            try { Get(key, strokeScale); }
+            catch (Exception ex) { Logger.Debug($"IconRegistry.Prefetch: '{key}' failed — {ex.Message}"); }
+        }
+    }
+
+    /// <summary>Removes all absolute-path (exe/file) cache entries, keeping built-in named icons.
+    /// Must be called under _lock.</summary>
     private static void EvictFileEntries()
     {
         var toRemove = _cache.Keys.Where(k => Path.IsPathRooted(k)).ToList();
         foreach (var k in toRemove)
         {
-            _cache[k]?.Dispose();
+            if (_cache[k] is { } bmp) Retire(bmp);
             _cache.Remove(k);
         }
         Logger.Debug($"IconRegistry: evicted {toRemove.Count} file-based cache entries.");
@@ -65,8 +102,32 @@ internal static class IconRegistry
     {
         lock (_lock)
         {
-            if (_cache.TryGetValue(key, out var bmp)) { bmp?.Dispose(); _cache.Remove(key); }
+            if (_cache.Remove(key, out var bmp) && bmp is not null) Retire(bmp);
         }
+    }
+
+    // Must be called under _lock.
+    private static void Retire(SKBitmap bmp)
+        => _retired.Add((bmp, Environment.TickCount64));
+
+    /// <summary>Disposes retired bitmaps whose grace period has expired. Cheap; call once per
+    /// frame from any drawing loop.</summary>
+    public static void DrainRetired()
+    {
+        List<SKBitmap>? due = null;
+        lock (_lock)
+        {
+            if (_retired.Count == 0) return;
+            long now = Environment.TickCount64;
+            for (int i = _retired.Count - 1; i >= 0; i--)
+            {
+                if (now - _retired[i].RetiredAt < RetireGraceMs) continue;
+                (due ??= new()).Add(_retired[i].Bitmap);
+                _retired.RemoveAt(i);
+            }
+        }
+        if (due is null) return;
+        foreach (var bmp in due) bmp.Dispose();
     }
 
     // ── Loader ────────────────────────────────────────────────────────────

@@ -92,6 +92,14 @@ internal sealed class OverlayWindow : IDisposable
     public void HideL3Menu()
         => _renderer.HideL3Menu();
 
+    /// <summary>Swaps the child ring's menu in place (no pop-out animation restart).</summary>
+    public void ReplaceChildMenu(RadialMenuConfig menu)
+        => _renderer.ReplaceChildMenu(menu);
+
+    /// <summary>Swaps the main ring's menu in place.</summary>
+    public void ReplaceMenu(RadialMenuConfig menu)
+        => _renderer.ReplaceMenu(menu);
+
     /// <summary>Flashes the volume arc on a scroll-wheel volume action.</summary>
     public void TriggerVolumeFlash()
         => _renderer.TriggerVolumeFlash();
@@ -135,6 +143,7 @@ internal sealed class OverlayWindow : IDisposable
         _winX    = x;
         _winY    = y;
         _winSize = physicalSize;
+        Logger.Debug($"Overlay window rect: ({x},{y}) size={physicalSize} dpi={dpiScale} cursor=({cursor.X},{cursor.Y})");
 
         // Set correct position/size before ShowWindow so window appears in the right place
         Win32.SetWindowPos(_hwnd, Win32.HWND_TOPMOST, x, y, physicalSize, physicalSize,

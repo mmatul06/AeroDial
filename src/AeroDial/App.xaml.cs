@@ -26,6 +26,20 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+
+        // XAML-level handler. Exceptions escaping async void event handlers (e.g. a
+        // file picker throwing after an await) are raised here as stowed exceptions
+        // and would otherwise fail-fast the process (0xC000027B) without reaching
+        // AppDomain.UnhandledException or the log. Mark handled so the tray app survives.
+        UnhandledException += OnXamlUnhandledException;
+    }
+
+    private static void OnXamlUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        Logger.Fatal("Unhandled XAML exception", e.Exception);
+        e.Handled = true;
+        try { Tray?.ShowBalloon("AeroDial hit an error", "Details were written to aerodial.log."); }
+        catch { /* tray may not exist yet */ }
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -35,10 +49,6 @@ public partial class App : Application
             try
             {
                 Logger.Info("AeroDial starting up.");
-
-                // Catch any unhandled exception and log it before the process dies
-                AppDomain.CurrentDomain.UnhandledException += (_, e) =>
-                    Logger.Fatal("Unhandled exception", e.ExceptionObject as Exception);
 
                 // Set Windows scheduler interrupt period to 1ms so Thread.Sleep in the
                 // render thread is accurate to ~1ms instead of the default ~15.625ms.
@@ -68,6 +78,7 @@ public partial class App : Application
                     });
 
                 Logger.Info("AeroDial ready. Running in system tray.");
+                SelfTest.Start(); // no-op unless launched with --selftest
             }
             catch (Exception ex)
             {
@@ -84,6 +95,7 @@ public partial class App : Application
         Tray?.Dispose();
         Overlay?.Dispose();
         MediaInfo?.Dispose();
+        Logger.FlushNow();
         Current.Exit();
     }
 }
