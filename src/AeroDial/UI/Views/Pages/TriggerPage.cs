@@ -49,7 +49,7 @@ public sealed partial class TriggerPage : Page
         {
             Text = VkName(_vk), FontSize = 18,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 160, 140, 255)),
+            Foreground = Ui.AccentText,
             Margin = new Thickness(0, 0, 0, 6),
         };
         stack.Children.Add(_keyDisplay);

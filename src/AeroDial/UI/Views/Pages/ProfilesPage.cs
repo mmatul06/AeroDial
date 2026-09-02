@@ -91,7 +91,7 @@ public sealed partial class ProfilesPage : Page
             {
                 Text       = "No app profiles yet. Add one below.",
                 FontSize   = 13,
-                Foreground = new SolidColorBrush(ColorHelper.FromArgb(160, 200, 200, 220)),
+                Foreground = Ui.TextSecondary,
             });
             return;
         }

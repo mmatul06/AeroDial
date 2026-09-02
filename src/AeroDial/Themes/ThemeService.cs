@@ -58,6 +58,17 @@ internal sealed class ThemeService
         Logger.Info($"User theme saved: {theme.Name}");
     }
 
+    /// <summary>Copies a theme (built-in or user) into a new user theme with the given name.</summary>
+    public AeroTheme Duplicate(AeroTheme source, string newName)
+    {
+        var json = JsonSerializer.Serialize(source);
+        var copy = JsonSerializer.Deserialize<AeroTheme>(json) ?? new AeroTheme();
+        copy.Name      = newName;
+        copy.IsBuiltIn = false;
+        SaveUserTheme(copy);
+        return copy;
+    }
+
     /// <summary>Delete a user-defined theme from AppData and from the in-memory registry.</summary>
     public void DeleteUserTheme(string name)
     {

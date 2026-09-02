@@ -1,46 +1,44 @@
-// AeroDial — ThemeEditorPage.cs
-// Split from SettingsPages.cs: one settings page per file.
+// AeroDial — ThemeEditorPanel.cs
+// Live theme editor hosted inside ThemesPage. Edits a copy of the loaded theme;
+// Save writes a user theme (built-in themes are saved as a new copy) and raises Saved.
 
-using AeroDial.Config;
-using AeroDial.Core;
-using AeroDial.Overlay;
 using AeroDial.Themes;
-using AeroDial.UI.Views;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using SkiaSharp;
 using SkiaSharp.Views.Windows;
 
 namespace AeroDial.UI.Views.Pages;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// ThemeEditorPage — create and save custom themes
-// ═══════════════════════════════════════════════════════════════════════════
-
-public sealed partial class ThemeEditorPage : Page
+public sealed partial class ThemeEditorPanel : UserControl
 {
+    /// <summary>Raised with the saved theme name after a successful save.</summary>
+    public event Action<string>? Saved;
+
     private TextBox    _nameBox = null!, _descBox = null!;
-    private TextBlock  _saved   = null!;
+    private TextBlock  _saved   = null!, _sourceNote = null!;
+    private Button     _saveBtn = null!, _saveApplyBtn = null!;
     private ComboBox   _fontFamilyCombo = null!;
-    private readonly Dictionary<string, TextBox>  _colorBoxes    = [];
-    private readonly Dictionary<string, Button>   _colorSwatches = []; // swatch buttons open ColorPicker flyout
-    private readonly Dictionary<string, TextBox>  _floatBoxes    = [];
+    private readonly Dictionary<string, TextBox> _colorBoxes    = [];
+    private readonly Dictionary<string, Button>  _colorSwatches = [];
+    private readonly Dictionary<string, TextBox> _floatBoxes    = [];
     private SKXamlCanvas? _previewCanvas;
+    private bool _loading;
+    private bool _sourceIsBuiltIn;
 
     // Color fields in display order: (property name, display label)
     private static readonly (string Prop, string Label)[] ColorFields =
     [
-        ("AccentColor",             "Accent color"),
+        ("AccentColor",             "Accent"),
         ("SliceFill",               "Slice fill"),
         ("SliceFillHover",          "Slice fill (hover)"),
         ("SliceGradientInner",      "Gradient inner"),
         ("SliceGradientOuter",      "Gradient outer"),
         ("SliceGradientInnerHover", "Gradient inner (hover)"),
         ("SliceGradientOuterHover", "Gradient outer (hover)"),
-        ("GlowColor",               "Glow color"),
+        ("GlowColor",               "Glow"),
         ("SliceStroke",             "Slice border"),
         ("SliceStrokeHover",        "Slice border (hover)"),
         ("RingBorderColor",         "Ring border (L2/L3)"),
@@ -48,35 +46,31 @@ public sealed partial class ThemeEditorPage : Page
         ("CenterStroke",            "Center border"),
         ("IconTint",                "Icon tint"),
         ("IconTintHover",           "Icon tint (hover)"),
-        ("LabelColor",              "Label color"),
-        ("LabelColorHover",         "Label color (hover)"),
-        ("DimColor",                "Background dim color"),
+        ("LabelColor",              "Label"),
+        ("LabelColorHover",         "Label (hover)"),
+        ("DimColor",                "Background dim"),
     ];
 
-    public ThemeEditorPage() => Build();
+    public ThemeEditorPanel() => Build();
 
     private void Build()
     {
-        // Two-column layout: color controls scroll left; preview pinned right.
+        // Two-column layout: fields scroll left; preview pinned right.
         var outerGrid = new Grid();
         outerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        outerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(236) });
+        outerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
 
-        var scroll = new ScrollViewer { Padding = new Thickness(32, 24, 16, 32) };
+        var scroll = new ScrollViewer { Padding = new Thickness(16, 24, 16, 32) };
         var stack  = new StackPanel { Spacing = 6 };
 
-        stack.Children.Add(PageKit.PageHeader("Theme Editor"));
-        stack.Children.Add(PageKit.InfoCard(
-            "Design a custom theme. Colors use #AARRGGBB format. " +
-            "Gradient fields can be left empty to fall back to flat slice fill. " +
-            "Saved themes appear in Appearance → Theme list immediately."));
+        stack.Children.Add(PageKit.PageHeader("Edit theme"));
+        _sourceNote = Ui.Hint("");
+        stack.Children.Add(_sourceNote);
 
         // ── Name / description ────────────────────────────────────────────
-        stack.Children.Add(PageKit.SubHeader("Theme identity"));
-        var baseTheme = App.Themes.ActiveTheme;
-
-        _nameBox = new TextBox { PlaceholderText = "My Theme", Text = "Custom " + baseTheme.Name };
-        _descBox = new TextBox { PlaceholderText = "A short description", Text = "" };
+        stack.Children.Add(PageKit.SubHeader("Identity"));
+        _nameBox = new TextBox { PlaceholderText = "My theme" };
+        _descBox = new TextBox { PlaceholderText = "A short description" };
 
         var identGrid = new Grid { ColumnSpacing = 12 };
         identGrid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -91,33 +85,15 @@ public sealed partial class ThemeEditorPage : Page
         Grid.SetColumn(descStack, 1); identGrid.Children.Add(descStack);
         stack.Children.Add(identGrid);
 
-        // ── Load from existing theme ──────────────────────────────────────
-        stack.Children.Add(PageKit.SubHeader("Start from"));
-        var loadRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var themePicker = new ComboBox { Width = 200 };
-        foreach (var n in App.Themes.AvailableThemes) themePicker.Items.Add(n);
-        themePicker.SelectedItem = baseTheme.Name;
-        var loadBtn = new Button { Content = "Load theme values" };
-        loadBtn.Click += (_, _) =>
-        {
-            if (themePicker.SelectedItem is string name)
-            {
-                var t = App.Themes.Get(name);
-                if (t is not null) PopulateFromTheme(t);
-            }
-        };
-        loadRow.Children.Add(themePicker);
-        loadRow.Children.Add(loadBtn);
-        stack.Children.Add(loadRow);
-
         // ── Color fields ──────────────────────────────────────────────────
-        stack.Children.Add(PageKit.SubHeader("Colors  — click swatch to pick, or type #AARRGGBB"));
+        stack.Children.Add(PageKit.SubHeader("Colors"));
+        stack.Children.Add(Ui.Hint("Click a swatch to pick, or type #AARRGGBB. Gradient fields may be empty to use the flat slice fill.", 11));
 
-        var colorGrid = new Grid { ColumnSpacing = 10, RowSpacing = 8 };
-        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(165) });
+        var colorGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6, Margin = new Thickness(0, 4, 0, 0) };
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(165) });
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
@@ -129,18 +105,13 @@ public sealed partial class ThemeEditorPage : Page
             if (colorGrid.RowDefinitions.Count <= row)
                 colorGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            string initVal = GetColorProp(baseTheme, prop);
-
-            // Label
             var lbl = new TextBlock { Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(lbl, col); Grid.SetRow(lbl, row); colorGrid.Children.Add(lbl);
 
-            // ColorPicker inside a Flyout — opened by clicking the swatch button
             var picker = new ColorPicker
             {
-                Color                   = HexToColor(initVal),
                 IsAlphaEnabled          = true,
-                IsHexInputVisible       = false, // use our TextBox for hex; avoids format confusion
+                IsHexInputVisible       = false,
                 IsAlphaTextInputVisible = true,
                 Width                   = 300,
             };
@@ -150,44 +121,30 @@ public sealed partial class ThemeEditorPage : Page
                 Placement                   = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.TopEdgeAlignedLeft,
                 ShouldConstrainToRootBounds = false,
             };
-
             var swatchBtn = new Button
             {
-                Width        = 28,
-                Height       = 28,
-                Padding      = new Thickness(0),
+                Width = 28, Height = 28, Padding = new Thickness(0),
                 CornerRadius = new CornerRadius(4),
-                Background   = HexToBrush(initVal),
-                Flyout       = flyout,
-                VerticalAlignment = VerticalAlignment.Center,
+                BorderBrush = Ui.CardStroke, BorderThickness = new Thickness(1),
+                Flyout = flyout, VerticalAlignment = VerticalAlignment.Center,
             };
             _colorSwatches[prop] = swatchBtn;
             Grid.SetColumn(swatchBtn, col + 1); Grid.SetRow(swatchBtn, row); colorGrid.Children.Add(swatchBtn);
 
-            // TextBox for direct hex editing
-            var box = new TextBox { Text = initVal, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            var box = new TextBox { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
             _colorBoxes[prop] = box;
             Grid.SetColumn(box, col + 2); Grid.SetRow(box, row); colorGrid.Children.Add(box);
 
-            // Two-way sync: TextBox ↔ ColorPicker.
-            // `syncing` (per-field closure) breaks the feedback loop that would otherwise
-            // occur when one side's update triggers the other's change event.
+            // Two-way sync TextBox <-> ColorPicker; `syncing` breaks the feedback loop.
             bool syncing = false;
-
             box.TextChanged += (_, _) =>
             {
                 if (syncing) return;
                 swatchBtn.Background = HexToBrush(box.Text);
                 var c = TryHexToColor(box.Text);
-                if (c.HasValue)
-                {
-                    syncing = true;
-                    picker.Color = c.Value;
-                    syncing = false;
-                }
+                if (c.HasValue) { syncing = true; picker.Color = c.Value; syncing = false; }
                 _previewCanvas?.Invalidate();
             };
-
             picker.ColorChanged += (_, a) =>
             {
                 if (syncing) return;
@@ -196,6 +153,7 @@ public sealed partial class ThemeEditorPage : Page
                 box.Text = $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
                 syncing = false;
                 swatchBtn.Background = new SolidColorBrush(ColorHelper.FromArgb(c.A, c.R, c.G, c.B));
+                _previewCanvas?.Invalidate();
             };
         }
         stack.Children.Add(colorGrid);
@@ -203,25 +161,20 @@ public sealed partial class ThemeEditorPage : Page
         // ── Float properties ──────────────────────────────────────────────
         stack.Children.Add(PageKit.SubHeader("Other properties"));
         var floatGrid = new Grid { ColumnSpacing = 12, RowSpacing = 6 };
-        floatGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        floatGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        floatGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        floatGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        for (int i = 0; i < 3; i++) floatGrid.ColumnDefinitions.Add(new ColumnDefinition());
         floatGrid.RowDefinitions.Add(new RowDefinition());
-
-        (string Prop, string Label, string Val)[] floatFields =
+        (string Prop, string Label)[] floatFields =
         [
-            ("SliceStrokeWidth",    "Stroke width",        baseTheme.SliceStrokeWidth.ToString("0.##")),
-            ("LabelFontSize",       "Label font size",     baseTheme.LabelFontSize.ToString("0.##")),
-            ("VolumeRingThickness", "Volume ring width",   baseTheme.VolumeRingThickness.ToString("0.##")),
-            ("IconStrokeScale",     "Icon stroke scale",   baseTheme.IconStrokeScale.ToString("0.##")),
+            ("SliceStrokeWidth",    "Border width"),
+            ("LabelFontSize",       "Label font size"),
+            ("VolumeRingThickness", "Volume ring width"),
         ];
         for (int i = 0; i < floatFields.Length; i++)
         {
-            var (prop, lbl, val) = floatFields[i];
+            var (prop, lbl) = floatFields[i];
             var colStack = new StackPanel { Spacing = 4 };
             colStack.Children.Add(new TextBlock { Text = lbl, FontSize = 12 });
-            var tb = new TextBox { Text = val, FontSize = 12 };
+            var tb = new TextBox { FontSize = 12 };
             _floatBoxes[prop] = tb;
             colStack.Children.Add(tb);
             Grid.SetColumn(colStack, i); floatGrid.Children.Add(colStack);
@@ -229,7 +182,7 @@ public sealed partial class ThemeEditorPage : Page
         stack.Children.Add(floatGrid);
 
         // ── Font family ───────────────────────────────────────────────────
-        stack.Children.Add(PageKit.SubHeader("Label font family"));
+        stack.Children.Add(PageKit.SubHeader("Label font"));
         _fontFamilyCombo = new ComboBox { Width = 260 };
         foreach (var f in new[]
         {
@@ -238,50 +191,29 @@ public sealed partial class ThemeEditorPage : Page
             "Verdana", "Georgia", "Times New Roman", "Impact",
         })
             _fontFamilyCombo.Items.Add(f);
-        _fontFamilyCombo.SelectedItem = baseTheme.LabelFontFamily;
-        if (_fontFamilyCombo.SelectedItem is null) _fontFamilyCombo.SelectedIndex = 0;
         _fontFamilyCombo.SelectionChanged += (_, _) => _previewCanvas?.Invalidate();
         stack.Children.Add(_fontFamilyCombo);
 
         // ── Save ──────────────────────────────────────────────────────────
-        var saveBtn = new Button
-        {
-            Content      = "Save theme",
-            Background   = new SolidColorBrush(ColorHelper.FromArgb(220, 100, 80, 220)),
-            Foreground   = new SolidColorBrush(Colors.White),
-            Padding      = new Thickness(20, 8, 20, 8),
-            CornerRadius = new CornerRadius(6),
-        };
-        saveBtn.Click += async (_, _) =>
-        {
-            BuildTheme();
-            await ShowSavedBadge();
-        };
+        _saveBtn = new Button { Content = "Save", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+        _saveBtn.Click += async (_, _) => { var n = SaveTheme(); if (n is not null) await ShowSavedBadge(); };
 
-        var saveApplyBtn = new Button
+        _saveApplyBtn = new Button { Content = "Save and apply" };
+        _saveApplyBtn.Click += async (_, _) =>
         {
-            Content      = "Save and apply",
-            Padding      = new Thickness(20, 8, 20, 8),
-            CornerRadius = new CornerRadius(6),
-        };
-        saveApplyBtn.Click += async (_, _) =>
-        {
-            var name = BuildTheme();
+            var name = SaveTheme();
+            if (name is null) return;
             await App.Config.UpdateAsync(cfg => cfg.Appearance.ThemeName = name);
             await ShowSavedBadge();
         };
 
         _saved = PageKit.SavedBadge();
         var saveRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(0, 14, 0, 0) };
-        saveRow.Children.Add(saveBtn);
-        saveRow.Children.Add(saveApplyBtn);
+        saveRow.Children.Add(_saveBtn);
+        saveRow.Children.Add(_saveApplyBtn);
         saveRow.Children.Add(_saved);
         stack.Children.Add(saveRow);
 
-        // Populate initial values from base theme
-        PopulateFromTheme(baseTheme);
-
-        // Wire float/name boxes to preview
         _nameBox.TextChanged += (_, _) => _previewCanvas?.Invalidate();
         foreach (var fb in _floatBoxes.Values) fb.TextChanged += (_, _) => _previewCanvas?.Invalidate();
 
@@ -289,8 +221,8 @@ public sealed partial class ThemeEditorPage : Page
         Grid.SetColumn(scroll, 0);
         outerGrid.Children.Add(scroll);
 
-        // Right column: live preview pinned — always visible while color fields scroll
-        var rightPanel = new StackPanel { Margin = new Thickness(0, 28, 20, 24), Spacing = 4 };
+        // Right column: live preview pinned
+        var rightPanel = new StackPanel { Margin = new Thickness(0, 28, 24, 24), Spacing = 4 };
         rightPanel.Children.Add(PageKit.SubHeader("Live preview"));
         _previewCanvas = new SKXamlCanvas
         {
@@ -306,37 +238,53 @@ public sealed partial class ThemeEditorPage : Page
         Content = outerGrid;
     }
 
-    private void PopulateFromTheme(AeroTheme t)
+    // ── Load / save ───────────────────────────────────────────────────────
+
+    /// <summary>Fills the editor from a theme. Built-in themes save as a new user theme.</summary>
+    public void Load(AeroTheme t)
     {
+        _loading = true;
+        _sourceIsBuiltIn = t.IsBuiltIn;
+        _nameBox.Text = t.IsBuiltIn ? t.Name + " copy" : t.Name;
+        _descBox.Text = t.Description;
+        _sourceNote.Text = t.IsBuiltIn
+            ? $"{t.Name} is built in. Your changes will be saved as a new theme."
+            : $"Editing {t.Name}.";
+        _saveBtn.Content = t.IsBuiltIn ? "Save as new theme" : "Save";
+
         foreach (var (prop, _) in ColorFields)
         {
             if (!_colorBoxes.TryGetValue(prop, out var box)) continue;
             string val = GetColorProp(t, prop);
-            // Setting box.Text triggers TextChanged which syncs the swatch button and picker.
-            // Also update the swatch directly as a safety net (in case Text was already the same value).
             box.Text = val;
             if (_colorSwatches.TryGetValue(prop, out var btn)) btn.Background = HexToBrush(val);
         }
         if (_floatBoxes.TryGetValue("SliceStrokeWidth",    out var fb1)) fb1.Text = t.SliceStrokeWidth.ToString("0.##");
         if (_floatBoxes.TryGetValue("LabelFontSize",       out var fb2)) fb2.Text = t.LabelFontSize.ToString("0.##");
-        if (_floatBoxes.TryGetValue("VolumeRingThickness", out var fb4)) fb4.Text = t.VolumeRingThickness.ToString("0.##");
-        if (_floatBoxes.TryGetValue("IconStrokeScale",     out var fb5)) fb5.Text = t.IconStrokeScale.ToString("0.##");
-        if (_fontFamilyCombo is not null)
-        {
-            _fontFamilyCombo.SelectedItem = t.LabelFontFamily;
-            if (_fontFamilyCombo.SelectedItem is null) _fontFamilyCombo.SelectedIndex = 0;
-        }
+        if (_floatBoxes.TryGetValue("VolumeRingThickness", out var fb3)) fb3.Text = t.VolumeRingThickness.ToString("0.##");
+        _fontFamilyCombo.SelectedItem = t.LabelFontFamily;
+        if (_fontFamilyCombo.SelectedItem is null) _fontFamilyCombo.SelectedIndex = 0;
+        _loading = false;
+        _previewCanvas?.Invalidate();
     }
 
-    /// <summary>Builds and saves the theme from current field values. Returns the saved theme name.</summary>
-    private string BuildTheme()
+    /// <summary>Builds and saves the theme from current field values. Returns the saved name, or null.</summary>
+    private string? SaveTheme()
     {
         var t = BuildThemeFromFields();
+        if (_sourceIsBuiltIn && App.Themes.Get(t.Name)?.IsBuiltIn == true)
+        {
+            _sourceNote.Text = "Choose a different name: built-in themes cannot be overwritten.";
+            return null;
+        }
         App.Themes.SaveUserTheme(t);
+        _sourceIsBuiltIn = false;
+        _saveBtn.Content = "Save";
+        _sourceNote.Text = $"Editing {t.Name}.";
+        Saved?.Invoke(t.Name);
         return t.Name;
     }
 
-    /// <summary>Builds a temporary AeroTheme from the current editor fields without saving it.</summary>
     private AeroTheme BuildThemeFromFields()
     {
         string name = _nameBox.Text.Trim();
@@ -345,28 +293,22 @@ public sealed partial class ThemeEditorPage : Page
         var t = new AeroTheme { Name = name, Description = _descBox.Text.Trim() };
 
         foreach (var (prop, _) in ColorFields)
-        {
-            if (_colorBoxes.TryGetValue(prop, out var box))
-                SetColorProp(t, prop, box.Text.Trim());
-        }
+            if (_colorBoxes.TryGetValue(prop, out var box)) SetColorProp(t, prop, box.Text.Trim());
 
-        if (_floatBoxes.TryGetValue("SliceStrokeWidth", out var fb1) &&
-            float.TryParse(fb1.Text, out float strokeW)) t.SliceStrokeWidth = strokeW;
-        if (_floatBoxes.TryGetValue("LabelFontSize", out var fb2) &&
-            float.TryParse(fb2.Text, out float fontSize)) t.LabelFontSize = fontSize;
+        if (_floatBoxes.TryGetValue("SliceStrokeWidth", out var fb1) && float.TryParse(fb1.Text, out float strokeW)) t.SliceStrokeWidth = strokeW;
+        if (_floatBoxes.TryGetValue("LabelFontSize", out var fb2) && float.TryParse(fb2.Text, out float fontSize)) t.LabelFontSize = fontSize;
+        if (_floatBoxes.TryGetValue("VolumeRingThickness", out var fb3) && float.TryParse(fb3.Text, out float volW) && volW > 0f) t.VolumeRingThickness = volW;
         if (_fontFamilyCombo?.SelectedItem is string fontFamily) t.LabelFontFamily = fontFamily;
-        if (_floatBoxes.TryGetValue("VolumeRingThickness", out var fb4) &&
-            float.TryParse(fb4.Text, out float volW) && volW > 0f) t.VolumeRingThickness = volW;
-        if (_floatBoxes.TryGetValue("IconStrokeScale", out var fb5) &&
-            float.TryParse(fb5.Text, out float iconScale) && iconScale > 0f) t.IconStrokeScale = iconScale;
-
         return t;
     }
+
+    // ── Preview ───────────────────────────────────────────────────────────
 
     private void OnPreviewPaint(object? sender, SKPaintSurfaceEventArgs e)
     {
         var canvas = e.Surface.Canvas;
         canvas.Clear(SKColors.Transparent);
+        if (_loading) return;
 
         AeroTheme theme;
         try   { theme = BuildThemeFromFields(); }
@@ -378,24 +320,21 @@ public sealed partial class ThemeEditorPage : Page
         float minDim  = Math.Min(w, h);
         float outerR  = minDim * 0.42f;
         float innerR  = minDim * 0.18f;
-        int   slices  = Math.Clamp(appear.SliceCount, 4, 12);
+        int   slices  = Math.Clamp(appear.SliceCount, 3, 12);
         float fullArc = 360f / slices;
         float gap     = appear.GapDegrees;
         float sweep   = fullArc - gap;
         float startOff = -90f - fullArc / 2f;
 
-        using var bgPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black.WithAlpha(60) };
+        using var bgPaint = new SKPaint { IsAntialias = true, Color = theme.ToSKColor(theme.DimColor) };
         canvas.DrawCircle(cx, cy, outerR + 6f, bgPaint);
 
         using var paint = new SKPaint { IsAntialias = true };
         for (int i = 0; i < slices; i++)
         {
-            float start    = startOff + i * fullArc + gap / 2f;
-            float midAngle = startOff + i * fullArc + fullArc / 2f;
-            float midRad   = midAngle * MathF.PI / 180f;
-            bool  isHover  = i == 0;
+            float start   = startOff + i * fullArc + gap / 2f;
+            bool  isHover = i == 0;
 
-            // Radial-style gradient from inner colour toward outer colour
             SKColor cInner = isHover && theme.SliceGradientInnerHover.Length > 0
                 ? theme.ToSKColor(theme.SliceGradientInnerHover)
                 : theme.SliceGradientInner.Length > 0
@@ -408,34 +347,23 @@ public sealed partial class ThemeEditorPage : Page
                     : cInner;
 
             paint.Style = SKPaintStyle.Fill;
-            if (theme.SliceGradientOuter.Length > 0 || (isHover && theme.SliceGradientOuterHover.Length > 0))
+            float gradPos = Math.Clamp(innerR / outerR, 0f, 0.95f);
+            using (var shader = SKShader.CreateRadialGradient(new SKPoint(cx, cy), outerR,
+                       [cInner, cOuter], [gradPos, 1f], SKShaderTileMode.Clamp))
             {
-                float gx1 = cx + MathF.Cos(midRad) * innerR;
-                float gy1 = cy + MathF.Sin(midRad) * innerR;
-                float gx2 = cx + MathF.Cos(midRad) * outerR;
-                float gy2 = cy + MathF.Sin(midRad) * outerR;
-                paint.Shader = SKShader.CreateLinearGradient(
-                    new SKPoint(gx1, gy1), new SKPoint(gx2, gy2),
-                    new[] { cInner, cOuter }, SKShaderTileMode.Clamp);
-            }
-            else
-            {
-                paint.Shader = null;
-                paint.Color  = cInner;
-            }
-
-            using (var path = ThemePreviewSlicePath(cx, cy, outerR, innerR, start, sweep))
+                paint.Shader = shader;
+                using var path = SlicePath(cx, cy, outerR, innerR, start, sweep);
                 canvas.DrawPath(path, paint);
-            paint.Shader = null;
+                paint.Shader = null;
+            }
 
             paint.Style       = SKPaintStyle.Stroke;
-            paint.StrokeWidth = isHover ? 2f : 0.8f;
+            paint.StrokeWidth = isHover ? 2f : Math.Max(theme.SliceStrokeWidth, 0.5f);
             paint.Color       = isHover ? theme.ToSKColor(theme.SliceStrokeHover) : theme.ToSKColor(theme.SliceStroke);
-            using (var path = ThemePreviewSlicePath(cx, cy, outerR, innerR, start, sweep))
+            using (var path = SlicePath(cx, cy, outerR, innerR, start, sweep))
                 canvas.DrawPath(path, paint);
         }
 
-        // Center circle
         paint.Style  = SKPaintStyle.Fill;
         paint.Shader = null;
         paint.Color  = theme.ToSKColor(theme.CenterFill);
@@ -445,14 +373,12 @@ public sealed partial class ThemeEditorPage : Page
         paint.Color       = theme.ToSKColor(theme.CenterStroke);
         canvas.DrawCircle(cx, cy, innerR, paint);
 
-        // Accent dot
         paint.Style = SKPaintStyle.Fill;
         paint.Color = theme.ToSKColor(theme.AccentColor);
         canvas.DrawCircle(cx, cy, 4f, paint);
     }
 
-    private static SKPath ThemePreviewSlicePath(float cx, float cy,
-        float outerR, float innerR, float start, float sweep)
+    private static SKPath SlicePath(float cx, float cy, float outerR, float innerR, float start, float sweep)
     {
         var path = new SKPath();
         path.ArcTo(new SKRect(cx - outerR, cy - outerR, cx + outerR, cy + outerR), start, sweep, true);
@@ -518,12 +444,10 @@ public sealed partial class ThemeEditorPage : Page
         }
     }
 
-    private static SolidColorBrush HexToBrush(string hex)
+    private static Brush HexToBrush(string hex)
     {
         var c = TryHexToColor(hex);
-        return c.HasValue
-            ? new SolidColorBrush(c.Value)
-            : new SolidColorBrush(ColorHelper.FromArgb(60, 140, 130, 200));
+        return c.HasValue ? new SolidColorBrush(c.Value) : Ui.SubtleFill;
     }
 
     /// <summary>Parses #AARRGGBB (or #RRGGBB) to Windows.UI.Color. Returns null on failure.</summary>
@@ -541,8 +465,4 @@ public sealed partial class ThemeEditorPage : Page
         catch { }
         return null;
     }
-
-    /// <summary>Converts #AARRGGBB to Windows.UI.Color, falling back to an opaque purple on failure.</summary>
-    private static Windows.UI.Color HexToColor(string hex)
-        => TryHexToColor(hex) ?? ColorHelper.FromArgb(255, 100, 90, 200);
 }

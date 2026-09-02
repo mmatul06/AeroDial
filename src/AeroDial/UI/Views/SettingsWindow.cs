@@ -1,17 +1,20 @@
 // AeroDial — SettingsWindow.cs
 // Settings window built entirely in code — no XAML dependency.
-// Uses ContentControl instead of Frame so pages can be pure code-behind
-// without requiring XAML-backed InitializeComponent.
+// Windows 11 native look: Mica backdrop, NavigationView rail with icon-font glyphs,
+// and every color from the theme resources so it follows the system light/dark
+// setting and accent color. Uses ContentControl instead of Frame so pages can be
+// pure code-behind without requiring XAML-backed InitializeComponent.
 
 using System.Runtime.InteropServices;
 using AeroDial.Core;
 using AeroDial.UI.Views.Pages;
-using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI;
+using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace AeroDial.UI.Views;
 
@@ -26,8 +29,28 @@ public sealed class SettingsWindow : Window
     private static Win32.WndProcDelegate? _wndProcDelegate;
     private static nint _prevWndProc;
 
-    private readonly ListView      _navList;
+    private const int WindowWidth  = 1080;
+    private const int WindowHeight = 760;
+
+    private readonly NavigationView _nav;
     private readonly ContentControl _contentFrame;
+    private string _currentTag = "trigger";
+
+    /// <summary>All navigation tags in sidebar order (used by the self-test to walk every page).</summary>
+    internal static readonly string[] PageTags =
+        ["trigger", "appearance", "behavior", "menus", "profiles", "themes", "advanced", "about"];
+
+    // (tag, label, Segoe Fluent Icons glyph)
+    private static readonly (string Tag, string Label, string Glyph)[] NavItems =
+    [
+        ("trigger",    "Trigger",      "E962"), // mouse
+        ("appearance", "Appearance",   "E7F4"), // monitor
+        ("behavior",   "Behavior",     "E945"), // lightning bolt
+        ("menus",      "Menus",        "E8FD"), // list
+        ("profiles",   "App profiles", "E71D"), // all apps
+        ("themes",     "Themes",       "E790"), // color
+        ("advanced",   "Advanced",     "E713"), // settings gear
+    ];
 
     // ── Static entry point ────────────────────────────────────────────────
 
@@ -49,98 +72,74 @@ public sealed class SettingsWindow : Window
         Win32.SetForegroundWindow(WindowHandle);
     }
 
+    /// <summary>Current window instance, if open (self-test only).</summary>
+    internal static SettingsWindow? Instance => _instance;
+
     // ── Constructor ───────────────────────────────────────────────────────
 
     public SettingsWindow()
     {
-        Title = "AeroDial — Settings";
+        Title = "AeroDial Settings";
 
-        // ── Root layout ───────────────────────────────────────────────────
+        // Mica (falls back to acrylic, then to the plain theme background) — the WinUI
+        // controls and Ui brushes all resolve through the theme dictionaries, so the
+        // window follows the Windows light/dark setting without any code here.
+        SystemBackdrop = MakeBackdrop();
+
         var root = new Grid();
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(40) });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        // ── Sidebar ───────────────────────────────────────────────────────
-        var sidebar = new Grid
+        // ── Custom title bar (drag region) ────────────────────────────────
+        var titleBar = new Grid { Height = 40, Padding = new Thickness(16, 0, 0, 0) };
+        var titleRow = new StackPanel
         {
-            Background = new SolidColorBrush(ColorHelper.FromArgb(255, 28, 28, 40)),
-        };
-        sidebar.RowDefinitions.Add(new RowDefinition { Height = new GridLength(72) });
-        sidebar.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        sidebar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        // Branding header
-        var brandRow = new StackPanel
-        {
-            Orientation       = Orientation.Horizontal,
-            Spacing           = 10,
-            Padding           = new Thickness(16, 0, 0, 0),
+            Orientation = Orientation.Horizontal, Spacing = 10,
             VerticalAlignment = VerticalAlignment.Center,
         };
-
-        UIElement brandDotGrid = BuildBrandIcon();
-
-        var brandText = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
-        brandText.Children.Add(new TextBlock
+        titleRow.Children.Add(BuildBrandIcon(18));
+        titleRow.Children.Add(new TextBlock
         {
-            Text       = "AeroDial",
+            Text = "AeroDial", FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Ui.TextSecondary,
+        });
+        titleBar.Children.Add(titleRow);
+        Grid.SetRow(titleBar, 0);
+        root.Children.Add(titleBar);
+
+        // ── Navigation rail ───────────────────────────────────────────────
+        _nav = new NavigationView
+        {
+            PaneDisplayMode              = NavigationViewPaneDisplayMode.Left,
+            OpenPaneLength               = 220,
+            IsSettingsVisible            = false,
+            IsBackButtonVisible          = NavigationViewBackButtonVisible.Collapsed,
+            IsPaneToggleButtonVisible    = false,
+            IsTitleBarAutoPaddingEnabled = false,
+        };
+
+        var paneHeader = new StackPanel { Padding = new Thickness(12, 8, 12, 12), Spacing = 2 };
+        paneHeader.Children.Add(new TextBlock
+        {
+            Text = "AeroDial", FontSize = 20,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            FontSize   = 15,
         });
-        brandText.Children.Add(new TextBlock
+        paneHeader.Children.Add(new TextBlock
         {
-            Text       = $"v{AppConstants.Version}",
-            FontSize   = 11,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            Text = $"Version {AppConstants.Version}", FontSize = 12, Foreground = Ui.TextSecondary,
         });
+        _nav.PaneHeader = paneHeader;
 
-        brandRow.Children.Add(brandDotGrid);
-        brandRow.Children.Add(brandText);
-        Grid.SetRow(brandRow, 0);
-        sidebar.Children.Add(brandRow);
+        foreach (var (tag, label, glyph) in NavItems)
+            _nav.MenuItems.Add(new NavigationViewItem { Content = label, Tag = tag, Icon = Ui.Glyph(glyph) });
+        _nav.FooterMenuItems.Add(new NavigationViewItem { Content = "About", Tag = "about", Icon = Ui.Glyph("E946") });
 
-        // Nav list
-        _navList = new ListView
+        _nav.SelectionChanged += (_, e) =>
         {
-            SelectionMode = ListViewSelectionMode.Single,
-            Padding       = new Thickness(8, 4, 8, 4),
+            if (e.SelectedItem is NavigationViewItem item && item.Tag is string tag)
+                Navigate(tag);
         };
-
-        foreach (var (tag, label) in new[]
-        {
-            ("trigger",      "Trigger"),
-            ("appearance",   "Appearance"),
-            ("behavior",     "Behavior"),
-            ("dynamic",      "Dynamic"),
-            ("menus",        "Menus"),
-            ("profiles",     "App Profiles"),
-            ("themes",       "Themes"),
-            ("theme_editor", "Theme Editor"),
-            ("advanced",     "Advanced"),
-            ("about",        "About"),
-        })
-        {
-            _navList.Items.Add(new ListViewItem { Tag = tag, Content = label });
-        }
-
-        _navList.SelectionChanged += OnNavSelectionChanged;
-        Grid.SetRow(_navList, 1);
-        sidebar.Children.Add(_navList);
-
-        // Footer
-        var footer = new TextBlock
-        {
-            Text                = "3M Design Solutions",
-            FontSize            = 10,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Foreground          = new SolidColorBrush(ColorHelper.FromArgb(80, 200, 200, 220)),
-            Margin              = new Thickness(0, 0, 0, 12),
-        };
-        Grid.SetRow(footer, 2);
-        sidebar.Children.Add(footer);
-
-        Grid.SetColumn(sidebar, 0);
-        root.Children.Add(sidebar);
 
         // ── Content area (ContentControl instead of Frame) ────────────────
         _contentFrame = new ContentControl
@@ -148,65 +147,64 @@ public sealed class SettingsWindow : Window
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment   = VerticalAlignment.Stretch,
         };
-        Grid.SetColumn(_contentFrame, 1);
-        root.Children.Add(_contentFrame);
+        _nav.Content = _contentFrame;
 
+        Grid.SetRow(_nav, 1);
+        root.Children.Add(_nav);
         Content = root;
 
         WindowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        ConfigureChrome();
+        ConfigureChrome(titleBar);
         InstallWndProc();
         // No AppWindow.Closing handler — WM_CLOSE is intercepted in the WndProc
         // to hide the window to the tray instead of destroying it.
 
+        // Pages are built in code with brushes resolved at construction time, so rebuild
+        // the visible page when Windows switches between light and dark.
+        root.ActualThemeChanged += (_, _) => Navigate(_currentTag);
+
         // Select first item after layout is ready
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            _navList.SelectedIndex = 0;
-        });
+        DispatcherQueue.TryEnqueue(() => _nav.SelectedItem = _nav.MenuItems[0]);
 
         Logger.Info("SettingsWindow opened.");
     }
 
-    // ── Navigation ────────────────────────────────────────────────────────
-
-    /// <summary>All navigation tags in sidebar order (used by the self-test to walk every page).</summary>
-    internal static readonly string[] PageTags =
-        ["trigger", "appearance", "behavior", "dynamic", "menus", "profiles", "themes", "theme_editor", "advanced", "about"];
-
-    /// <summary>Current window instance, if open (self-test only).</summary>
-    internal static SettingsWindow? Instance => _instance;
-
-    /// <summary>Selects a page as if the user clicked it in the sidebar.</summary>
-    internal void NavigateTo(string tag)
+    private static SystemBackdrop? MakeBackdrop()
     {
-        for (int i = 0; i < _navList.Items.Count; i++)
-            if (_navList.Items[i] is ListViewItem li && (string?)li.Tag == tag) { _navList.SelectedIndex = i; return; }
+        try
+        {
+            if (MicaController.IsSupported()) return new MicaBackdrop { Kind = MicaKind.Base };
+            if (DesktopAcrylicController.IsSupported()) return new DesktopAcrylicBackdrop();
+        }
+        catch (Exception ex) { Logger.Warn("System backdrop unavailable", ex); }
+        return null;
     }
 
-    private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)
+    // ── Navigation ────────────────────────────────────────────────────────
+
+    /// <summary>Selects a page as if the user clicked it in the rail.</summary>
+    internal void NavigateTo(string tag)
     {
-        if (_navList.SelectedItem is ListViewItem item && item.Tag is string tag)
-            Navigate(tag);
+        foreach (var it in _nav.MenuItems.Concat(_nav.FooterMenuItems))
+            if (it is NavigationViewItem nvi && (string?)nvi.Tag == tag) { _nav.SelectedItem = nvi; return; }
     }
 
     private void Navigate(string tag)
     {
+        _currentTag = tag;
         // Instantiate pages directly — avoids Frame.Navigate() which crashes
         // when pages are built in pure code without XAML-generated InitializeComponent.
         UIElement content = tag switch
         {
-            "trigger"      => new TriggerPage(),
-            "appearance"   => new AppearancePage(),
-            "behavior"     => new BehaviorPage(),
-            "dynamic"      => new DynamicPage(),
-            "menus"        => new MenusPage(),
-            "profiles"     => new ProfilesPage(),
-            "themes"       => new ThemesPage(),
-            "theme_editor" => new ThemeEditorPage(),
-            "advanced"     => new AdvancedPage(),
-            "about"        => new AboutPage(),
-            _              => new TriggerPage(),
+            "trigger"    => new TriggerPage(),
+            "appearance" => new AppearancePage(),
+            "behavior"   => new BehaviorPage(),
+            "menus"      => new MenusPage(),
+            "profiles"   => new ProfilesPage(),
+            "themes"     => new ThemesPage(),
+            "advanced"   => new AdvancedPage(),
+            "about"      => new AboutPage(),
+            _            => new TriggerPage(),
         };
         _contentFrame.Content = content;
     }
@@ -256,72 +254,50 @@ public sealed class SettingsWindow : Window
 
     // ── Brand icon ────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Returns a 32×32 brand icon for the sidebar. Loads Assets/aerodial.ico when present;
-    /// falls back to the purple "A" circle so the app still looks polished without an icon file.
-    /// </summary>
-    private static UIElement BuildBrandIcon()
+    /// <summary>The app icon (Assets/aerodial.ico) at the given size; a plain glyph if missing.</summary>
+    internal static UIElement BuildBrandIcon(double size)
     {
         try
         {
-            var iconPath = Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory, "Assets", "aerodial.ico");
+            var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "aerodial.ico");
             if (File.Exists(iconPath))
                 return new Image
                 {
                     Source  = new BitmapImage(new Uri(iconPath)),
-                    Width   = 32,
-                    Height  = 32,
+                    Width   = size, Height = size,
                     Stretch = Stretch.Uniform,
+                    VerticalAlignment = VerticalAlignment.Center,
                 };
         }
         catch { /* icon file missing or corrupt — use fallback */ }
 
-        // Fallback: purple circle with "A"
-        var dot = new Border
-        {
-            Width        = 32,
-            Height       = 32,
-            CornerRadius = new CornerRadius(16),
-            Background   = new SolidColorBrush(ColorHelper.FromArgb(255, 124, 110, 247)),
-        };
-        var text = new TextBlock
-        {
-            Text                = "A",
-            FontSize            = 16,
-            FontWeight          = Microsoft.UI.Text.FontWeights.Bold,
-            Foreground          = new SolidColorBrush(Colors.White),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment   = VerticalAlignment.Center,
-        };
-        var grid = new Grid { Width = 32, Height = 32 };
-        grid.Children.Add(dot);
-        grid.Children.Add(text);
-        return grid;
+        var glyph = Ui.Glyph("E76D", size); // dial
+        glyph.VerticalAlignment = VerticalAlignment.Center;
+        return glyph;
     }
 
     // ── Chrome ────────────────────────────────────────────────────────────
 
-    private void ConfigureChrome()
+    private void ConfigureChrome(UIElement dragRegion)
     {
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(900, 680));
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(WindowWidth, WindowHeight));
         AppWindow.IsShownInSwitchers = true;
 
-        var iconPath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory, "Assets", "aerodial.ico");
+        var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "aerodial.ico");
         if (File.Exists(iconPath))
             AppWindow.SetIcon(iconPath);
 
         if (AppWindowTitleBar.IsCustomizationSupported())
         {
-            AppWindow.TitleBar.ExtendsContentIntoTitleBar = true;
+            ExtendsContentIntoTitleBar = true;
+            SetTitleBar(dragRegion);
             AppWindow.TitleBar.ButtonBackgroundColor         = Colors.Transparent;
             AppWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
         }
 
         var display = DisplayArea.Primary;
-        int x = (display.WorkArea.Width  - 900) / 2;
-        int y = (display.WorkArea.Height - 680) / 2;
-        AppWindow.Move(new Windows.Graphics.PointInt32(x, y));
+        int x = (display.WorkArea.Width  - WindowWidth)  / 2;
+        int y = (display.WorkArea.Height - WindowHeight) / 2;
+        AppWindow.Move(new Windows.Graphics.PointInt32(Math.Max(0, x), Math.Max(0, y)));
     }
 }

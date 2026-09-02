@@ -1,12 +1,9 @@
 // AeroDial — AboutContent.cs
 // Builds the About UI panel used by both Settings > About and the standalone dialog.
 
-using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Shapes;
 
 namespace AeroDial.UI.Views;
 
@@ -17,43 +14,14 @@ internal static class AboutContent
         var scroll = new ScrollViewer { Padding = new Thickness(40, 32, 40, 32) };
         var root   = new StackPanel { Spacing = 0 };
 
-        // ── Logo + name ───────────────────────────────────────────────────
+        // ── Icon + name ───────────────────────────────────────────────────
         var logoRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing     = 18,
             Margin      = new Thickness(0, 0, 0, 24),
         };
-
-        var logoCircle = new Ellipse
-        {
-            Width  = 56,
-            Height = 56,
-            Fill   = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0),
-                EndPoint   = new Windows.Foundation.Point(1, 1),
-                GradientStops =
-                {
-                    new GradientStop { Color = ColorHelper.FromArgb(255, 124, 110, 247), Offset = 0 },
-                    new GradientStop { Color = ColorHelper.FromArgb(255,  93, 202, 165), Offset = 1 },
-                }
-            }
-        };
-
-        var monogram = new TextBlock
-        {
-            Text                = "A",
-            FontSize            = 28,
-            FontWeight          = FontWeights.Bold,
-            Foreground          = new SolidColorBrush(Colors.White),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment   = VerticalAlignment.Center,
-        };
-
-        var logoGrid = new Grid { Width = 56, Height = 56 };
-        logoGrid.Children.Add(logoCircle);
-        logoGrid.Children.Add(monogram);
+        logoRow.Children.Add(SettingsWindow.BuildBrandIcon(56));
 
         var titleStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
         titleStack.Children.Add(new TextBlock
@@ -64,22 +32,14 @@ internal static class AboutContent
         });
         titleStack.Children.Add(new TextBlock
         {
-            Text       = $"Version {AppConstants.Version}  •  Windows 10 / 11",
+            Text       = $"Version {AppConstants.Version}  |  Windows 10 / 11",
             FontSize   = 13,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(180, 180, 180, 200)),
+            Foreground = Ui.TextSecondary,
         });
-
-        logoRow.Children.Add(logoGrid);
         logoRow.Children.Add(titleStack);
         root.Children.Add(logoRow);
 
-        // ── Separator ─────────────────────────────────────────────────────
-        root.Children.Add(new Border
-        {
-            Height     = 1,
-            Background = new SolidColorBrush(ColorHelper.FromArgb(40, 200, 200, 220)),
-            Margin     = new Thickness(0, 0, 0, 24),
-        });
+        root.Children.Add(Divider(24));
 
         // ── Description ───────────────────────────────────────────────────
         root.Children.Add(BodyText(
@@ -102,7 +62,7 @@ internal static class AboutContent
             Text         = $"Current version: {AppConstants.Version}",
             FontSize     = 13,
             TextWrapping = TextWrapping.Wrap,
-            Foreground   = new SolidColorBrush(ColorHelper.FromArgb(160, 200, 200, 220)),
+            Foreground   = Ui.TextSecondary,
             Margin       = new Thickness(0, 0, 0, 8),
         };
         root.Children.Add(updateText);
@@ -137,7 +97,7 @@ internal static class AboutContent
             {
                 case AeroDial.Core.UpdateChecker.UpdateStatus.UpdateAvailable:
                     updateText.Text = $"Update available: v{latest}";
-                    updateText.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 100, 220, 130));
+                    updateText.Foreground = Ui.Success;
                     if (releaseUrl is not null)
                     {
                         downloadBtn.NavigateUri = new Uri(releaseUrl);
@@ -147,12 +107,12 @@ internal static class AboutContent
 
                 case AeroDial.Core.UpdateChecker.UpdateStatus.UpToDate:
                     updateText.Text = $"You are up to date (v{latest}).";
-                    updateText.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 90, 210, 120));
+                    updateText.Foreground = Ui.Success;
                     break;
 
                 default:
                     updateText.Text = "Could not reach GitHub. Check your internet connection.";
-                    updateText.Foreground = new SolidColorBrush(ColorHelper.FromArgb(200, 220, 120, 100));
+                    updateText.Foreground = Ui.Caution;
                     break;
             }
         };
@@ -162,14 +122,6 @@ internal static class AboutContent
         // ── Developer section ─────────────────────────────────────────────
         root.Children.Add(SectionHeader("Developed by"));
         root.Children.Add(Spacer(8));
-
-        var devCard = new Border
-        {
-            Background   = new SolidColorBrush(ColorHelper.FromArgb(25, 124, 110, 247)),
-            CornerRadius = new CornerRadius(10),
-            Padding      = new Thickness(18, 14, 18, 14),
-            Margin       = new Thickness(0, 0, 0, 20),
-        };
 
         var devStack = new StackPanel { Spacing = 4 };
         devStack.Children.Add(new TextBlock
@@ -182,7 +134,7 @@ internal static class AboutContent
         {
             Text       = "3M Design Solutions",
             FontSize   = 13,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(200, 140, 130, 240)),
+            Foreground = Ui.TextSecondary,
         });
         devStack.Children.Add(new HyperlinkButton
         {
@@ -191,7 +143,8 @@ internal static class AboutContent
             Padding     = new Thickness(0),
             Margin      = new Thickness(0, 2, 0, 0),
         });
-        devCard.Child = devStack;
+        var devCard = Ui.Card(devStack, new Thickness(18, 14, 18, 14));
+        devCard.Margin = new Thickness(0, 0, 0, 20);
         root.Children.Add(devCard);
 
         // ── Links ─────────────────────────────────────────────────────────
@@ -218,27 +171,20 @@ internal static class AboutContent
         // ── Footer ────────────────────────────────────────────────────────
         root.Children.Add(new TextBlock
         {
-            Text       = "© 2025 Muhtasim Mahbub | 3M Design Solutions. All rights reserved.",
+            Text       = "© 2026 Muhtasim Mahbub | 3M Design Solutions. All rights reserved.",
             FontSize   = 11,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(100, 180, 180, 200)),
+            Foreground = Ui.TextTertiary,
         });
 
         root.Children.Add(Spacer(28));
 
         // ── Quit ──────────────────────────────────────────────────────────
-        root.Children.Add(new Border
-        {
-            Height     = 1,
-            Background = new SolidColorBrush(ColorHelper.FromArgb(40, 200, 200, 220)),
-            Margin     = new Thickness(0, 0, 0, 20),
-        });
+        root.Children.Add(Divider(20));
         var quitBtn = new Button
         {
-            Content      = "Quit AeroDial",
-            Background   = new SolidColorBrush(ColorHelper.FromArgb(200, 180, 50, 50)),
-            Foreground   = new SolidColorBrush(Colors.White),
-            Padding      = new Thickness(20, 9, 20, 9),
-            CornerRadius = new CornerRadius(6),
+            Content    = "Quit AeroDial",
+            Foreground = Ui.Critical,
+            Padding    = new Thickness(20, 8, 20, 8),
         };
         quitBtn.Click += (_, _) => App.RequestShutdown();
         root.Children.Add(quitBtn);
@@ -252,9 +198,8 @@ internal static class AboutContent
     private static TextBlock SectionHeader(string text) => new()
     {
         Text       = text,
-        FontSize   = 13,
+        FontSize   = 14,
         FontWeight = FontWeights.SemiBold,
-        Foreground = new SolidColorBrush(ColorHelper.FromArgb(160, 180, 170, 240)),
     };
 
     private static TextBlock BodyText(string text) => new()
@@ -263,10 +208,17 @@ internal static class AboutContent
         FontSize     = 14,
         TextWrapping = TextWrapping.Wrap,
         LineHeight   = 22,
-        Foreground   = new SolidColorBrush(ColorHelper.FromArgb(200, 200, 200, 210)),
+        Foreground   = Ui.TextSecondary,
     };
 
     private static UIElement Spacer(double h) => new Border { Height = h };
+
+    private static UIElement Divider(double bottomMargin) => new Border
+    {
+        Height     = 1,
+        Background = Ui.Divider,
+        Margin     = new Thickness(0, 0, 0, bottomMargin),
+    };
 
     private static HyperlinkButton LinkButton(string label, string url) => new()
     {

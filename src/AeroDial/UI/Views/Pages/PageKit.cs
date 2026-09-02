@@ -1,58 +1,43 @@
 // AeroDial — PageKit.cs
-// Split from SettingsPages.cs: one settings page per file.
+// Shared builders for the settings pages. Colors come from Ui (theme resources).
 
-using AeroDial.Config;
-using AeroDial.Core;
-using AeroDial.Overlay;
-using AeroDial.Themes;
-using AeroDial.UI.Views;
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using SkiaSharp;
-using SkiaSharp.Views.Windows;
 
 namespace AeroDial.UI.Views.Pages;
-
-
-// ── Shared helpers ────────────────────────────────────────────────────────────
 
 internal static class PageKit
 {
     public static TextBlock PageHeader(string t) => new()
     {
-        Text = t, FontSize = 22,
+        Text = t, FontSize = 26,
         FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         Margin = new Thickness(0, 0, 0, 16),
     };
 
     public static TextBlock SubHeader(string t) => new()
     {
-        Text = t, FontSize = 13,
+        Text = t, FontSize = 14,
         FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 130, 120, 200)),
-        Margin = new Thickness(0, 12, 0, 4),
+        Margin = new Thickness(0, 14, 0, 6),
     };
 
-    public static Border InfoCard(string t) => new()
+    /// <summary>Neutral explanatory card (Windows 11 settings style).</summary>
+    public static Border InfoCard(string t)
     {
-        Background   = new SolidColorBrush(ColorHelper.FromArgb(25, 100, 100, 200)),
-        CornerRadius = new CornerRadius(8),
-        Padding      = new Thickness(14, 10, 14, 10),
-        Margin       = new Thickness(0, 0, 0, 8),
-        Child        = new TextBlock
+        var card = Ui.Card(new TextBlock
         {
             Text = t, FontSize = 13, TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(200, 200, 200, 220)),
-        }
-    };
+            Foreground = Ui.TextSecondary,
+        });
+        card.Margin = new Thickness(0, 0, 0, 8);
+        return card;
+    }
 
     public static TextBlock SavedBadge() => new()
     {
-        Text = "✓  Saved", FontSize = 13,
-        Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 100, 220, 130)),
+        Text = "Saved", FontSize = 13,
+        Foreground = Ui.Success,
         Visibility = Visibility.Collapsed,
         VerticalAlignment = VerticalAlignment.Center,
     };
@@ -62,6 +47,10 @@ internal static class PageKit
         Content = "Save changes",
         Style   = (Style)Application.Current.Resources["AccentButtonStyle"],
     };
+
+    /// <summary>A button whose text is drawn in the critical color (delete, remove, quit).</summary>
+    public static Button DangerButton(string content)
+        => new() { Content = content, Foreground = Ui.Critical };
 
     public static Slider MakeSlider(string header, double min, double max, double step, double val)
         => new() { Header = header, Minimum = min, Maximum = max, StepFrequency = step, Value = val, Width = 340 };

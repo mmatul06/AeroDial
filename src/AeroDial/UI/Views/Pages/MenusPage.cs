@@ -65,6 +65,24 @@ public sealed partial class MenusPage : Page
     private CheckBox   _runAsAdmin = null!;
     private ComboBox   _mediaCombo = null!, _subMenuSel = null!;
 
+    // Scroll-wheel bindings (any non-submenu slice): scrolling while hovering fires a media action
+    private StackPanel _scrollPane = null!;
+    private ComboBox   _scrollUp   = null!, _scrollDown = null!;
+    private static readonly string[] ScrollActionNames =
+        ["None", "Volume up", "Volume down", "Play / pause", "Next", "Previous", "Mute"];
+    private static MediaActionType? ScrollIndexToAction(int i) => i switch
+    {
+        1 => MediaActionType.VolumeUp, 2 => MediaActionType.VolumeDown, 3 => MediaActionType.PlayPause,
+        4 => MediaActionType.Next,     5 => MediaActionType.Previous,   6 => MediaActionType.Mute,
+        _ => null,
+    };
+    private static int ScrollActionToIndex(MediaActionType? a) => a switch
+    {
+        MediaActionType.VolumeUp => 1, MediaActionType.VolumeDown => 2, MediaActionType.PlayPause => 3,
+        MediaActionType.Next     => 4, MediaActionType.Previous   => 5, MediaActionType.Mute      => 6,
+        _ => 0,
+    };
+
     // Macro editor (step list) working state for the currently-edited item
     private StackPanel      _macroRows  = null!;
     private List<MacroStep> _macroSteps = [];
@@ -110,8 +128,7 @@ public sealed partial class MenusPage : Page
         };
 
         Button Btn(string txt, RoutedEventHandler h) { var b = new Button { Content = txt }; b.Click += h; return b; }
-        var deleteMenuBtn = new Button { Content = "Delete" };
-        deleteMenuBtn.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 255, 90, 90));
+        var deleteMenuBtn = PageKit.DangerButton("Delete");
         deleteMenuBtn.Click += (_, _) => DeleteMenuAsync().FireAndForget();
 
         menuRow.Children.Add(_menuCombo);
@@ -129,14 +146,16 @@ public sealed partial class MenusPage : Page
         _crumbBar = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         _profileBadge = new Border
         {
-            Background        = new SolidColorBrush(ColorHelper.FromArgb(40, 120, 110, 200)),
+            Background        = Ui.SubtleFill,
+            BorderBrush       = Ui.CardStroke,
+            BorderThickness   = new Thickness(1),
             CornerRadius      = new CornerRadius(10),
             Padding           = new Thickness(10, 3, 10, 3),
             VerticalAlignment = VerticalAlignment.Center,
             Child = new TextBlock
             {
                 Text = "Not bound to any app", FontSize = 12,
-                Foreground = new SolidColorBrush(ColorHelper.FromArgb(230, 200, 200, 230)),
+                Foreground = Ui.TextSecondary,
             },
         };
         ToolTipService.SetToolTip(_profileBadge, "Manage bindings on the App Profiles page");
@@ -169,7 +188,7 @@ public sealed partial class MenusPage : Page
         {
             Text = "Click a slice to edit. Click a + slot to add. Drag a slice to move or swap.",
             FontSize = 12, TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            Foreground = Ui.TextSecondary,
             Margin = new Thickness(0, 2, 0, 0),
         });
 
@@ -192,7 +211,7 @@ public sealed partial class MenusPage : Page
         {
             Text = "Unsaved changes", FontSize = 13,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 240, 190, 90)),
+            Foreground = Ui.Caution,
         };
         var dirtyInner = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
         dirtyInner.Children.Add(warn);
@@ -214,14 +233,9 @@ public sealed partial class MenusPage : Page
 
     private Border BuildEditorCard()
     {
-        var card = new Border
-        {
-            Background   = new SolidColorBrush(ColorHelper.FromArgb(20, 100, 100, 200)),
-            CornerRadius = new CornerRadius(10),
-            Padding      = new Thickness(16, 14, 16, 14),
-            Visibility   = Visibility.Collapsed,
-        };
-        var s = new StackPanel { Spacing = 6 };
+        var s    = new StackPanel { Spacing = 6 };
+        var card = Ui.Card(s, new Thickness(16, 14, 16, 14));
+        card.Visibility = Visibility.Collapsed;
 
         var headerRow = new Grid { Margin = new Thickness(0, 0, 0, 2) };
         headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -232,12 +246,8 @@ public sealed partial class MenusPage : Page
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        var removeBtn = new Button
-        {
-            Content    = "Remove",
-            Padding    = new Thickness(8, 4, 8, 4),
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 255, 120, 120)),
-        };
+        var removeBtn = PageKit.DangerButton("Remove");
+        removeBtn.Padding = new Thickness(8, 4, 8, 4);
         removeBtn.Click += RemoveItem;
         Grid.SetColumn(headerText, 0);
         Grid.SetColumn(removeBtn, 1);
@@ -330,7 +340,7 @@ public sealed partial class MenusPage : Page
         {
             Text = "Opens in File Explorer. A file path selects that file in its folder.",
             FontSize = 11, TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            Foreground = Ui.TextSecondary,
         });
 
         _commandPane = Pane();
@@ -344,7 +354,7 @@ public sealed partial class MenusPage : Page
             Text = "Works like the Windows Run box (Win+R): programs, URIs, shell: folders, and %VARIABLES%. " +
                    "Run as administrator shows a UAC prompt.",
             FontSize = 11, TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            Foreground = Ui.TextSecondary,
         });
 
         _urlPane = Pane();
@@ -420,11 +430,23 @@ public sealed partial class MenusPage : Page
             Text = "Text steps type literal characters. Use Press key for Enter, Tab, or chords like Ctrl+S. " +
                    "Key down and Key up hold a key across later steps.",
             FontSize = 11, TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            Foreground = Ui.TextSecondary,
             Margin = new Thickness(0, 2, 0, 0),
         });
 
         s.Children.Add(payloads);
+
+        // ── Scroll wheel (moved here from the old Dynamic page) ───────────
+        _scrollPane = new StackPanel { Spacing = 4, Margin = new Thickness(0, 6, 0, 0) };
+        _scrollPane.Children.Add(new TextBlock { Text = "Scroll wheel on this slice", FontSize = 12 });
+        var scrollRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        _scrollUp   = new ComboBox { Width = 150, ItemsSource = ScrollActionNames, Header = "Scroll up" };
+        _scrollDown = new ComboBox { Width = 150, ItemsSource = ScrollActionNames, Header = "Scroll down" };
+        scrollRow.Children.Add(_scrollUp);
+        scrollRow.Children.Add(_scrollDown);
+        _scrollPane.Children.Add(scrollRow);
+        _scrollPane.Children.Add(Ui.Hint("While the dial is open and the cursor is on this slice, the wheel runs these without closing the menu.", 11));
+        s.Children.Add(_scrollPane);
 
         var applyBtn = new Button
         {
@@ -435,7 +457,6 @@ public sealed partial class MenusPage : Page
         applyBtn.Click += ApplyItem;
         s.Children.Add(applyBtn);
 
-        card.Child = s;
         return card;
     }
 
@@ -494,7 +515,7 @@ public sealed partial class MenusPage : Page
         {
             Text = "Any glyph from the Segoe Fluent Icons font works: type fluent:E8B7 (its hex code) in the icon box.",
             FontSize = 11, TextWrapping = TextWrapping.Wrap, Width = 344,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+            Foreground = Ui.TextSecondary,
         });
         flyout.Content = panel;
         flyout.Opened += (_, _) => search.Focus(FocusState.Programmatic);
@@ -579,7 +600,7 @@ public sealed partial class MenusPage : Page
                 {
                     Text = "›", Margin = new Thickness(4, 0, 4, 0),
                     VerticalAlignment = VerticalAlignment.Center,
-                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+                    Foreground = Ui.TextSecondary,
                 });
 
             if (d == _crumb.Count - 1)
@@ -779,6 +800,8 @@ public sealed partial class MenusPage : Page
         _folderPath.Text = item.FolderPath ?? "";
         _commandBox.Text = item.Command    ?? "";
         _runAsAdmin.IsChecked = item.RunAsAdmin;
+        _scrollUp.SelectedIndex   = ScrollActionToIndex(item.ScrollUpAction);
+        _scrollDown.SelectedIndex = ScrollActionToIndex(item.ScrollDownAction);
 
         var mNames = Enum.GetNames<MediaActionType>();
         _mediaCombo.SelectedIndex = item.MediaAction.HasValue
@@ -826,6 +849,7 @@ public sealed partial class MenusPage : Page
         _scriptPane.Visibility  = at == ActionType.RunScript      ? Visibility.Visible : Visibility.Collapsed;
         _clipPane.Visibility    = at == ActionType.PasteClipboard ? Visibility.Visible : Visibility.Collapsed;
         _macroPane.Visibility   = at == ActionType.Macro          ? Visibility.Visible : Visibility.Collapsed;
+        _scrollPane.Visibility  = at is not (ActionType.SubMenu or ActionType.None) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ── Macro step editor ─────────────────────────────────────────────────
@@ -848,7 +872,7 @@ public sealed partial class MenusPage : Page
             _macroRows.Children.Add(new TextBlock
             {
                 Text = "No steps yet. Add one below.", FontSize = 12,
-                Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+                Foreground = Ui.TextSecondary,
             });
             return;
         }
@@ -863,7 +887,7 @@ public sealed partial class MenusPage : Page
             {
                 Text = $"{i + 1}", Width = 18, FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center,
-                Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+                Foreground = Ui.TextSecondary,
             });
 
             var typeCombo = new ComboBox { Width = 110 };
@@ -945,6 +969,10 @@ public sealed partial class MenusPage : Page
             Cur.Macro = at == ActionType.Macro
                 ? _macroSteps.Select(m => new MacroStep { Type = m.Type, Value = m.Value, DelayMs = m.DelayMs }).ToList()
                 : null;
+
+            bool scrollable = at is not (ActionType.SubMenu or ActionType.None);
+            Cur.ScrollUpAction   = scrollable ? ScrollIndexToAction(_scrollUp.SelectedIndex)   : null;
+            Cur.ScrollDownAction = scrollable ? ScrollIndexToAction(_scrollDown.SelectedIndex) : null;
         }
 
         _ringCanvas?.Invalidate();
@@ -1280,7 +1308,7 @@ public sealed partial class MenusPage : Page
             Text         = "Select a preset — it will replace all items in the current menu.",
             TextWrapping = TextWrapping.Wrap,
             FontSize     = 12,
-            Foreground   = new SolidColorBrush(ColorHelper.FromArgb(160, 200, 200, 220)),
+            Foreground   = Ui.TextSecondary,
         };
         var presetContent = new StackPanel { Spacing = 8 };
         presetContent.Children.Add(hint);
@@ -1444,7 +1472,8 @@ public sealed partial class MenusPage : Page
     private void OnIconPreviewPaint(object? sender, SKPaintSurfaceEventArgs e)
     {
         var canvas = e.Surface.Canvas;
-        canvas.Clear(new SKColor(35, 35, 45, 200));
+        // Preview on the dial theme's own center color so the tinted glyph reads the way it will on the ring.
+        canvas.Clear(App.Themes.ActiveTheme.ToSKColor(App.Themes.ActiveTheme.CenterFill).WithAlpha(255));
 
         string key = _iconBox?.Text.Trim() ?? "";
         if (string.IsNullOrEmpty(key)) return;

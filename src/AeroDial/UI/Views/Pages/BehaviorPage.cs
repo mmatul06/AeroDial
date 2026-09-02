@@ -159,7 +159,7 @@ public sealed partial class BehaviorPage : Page
         {
             Text       = "Settings restored. Reopen Settings to see updated values.",
             FontSize   = 12,
-            Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 100, 220, 130)),
+            Foreground = Ui.Success,
             Visibility = Visibility.Collapsed,
             Margin     = new Thickness(0, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap,
