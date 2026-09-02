@@ -49,14 +49,27 @@ internal static class SelfTest
             (int X, int Y) Slice(int i)      => At(ringMid,  -90f + i * arc);
             (int X, int Y) ChildOf(int i)    => At(childMid, -90f + i * arc);
 
+            // Screenshots go to %AppData%\AeroDial\selftest\ so the result can be inspected.
+            string shots = Path.Combine(AppConstants.AppDataDir, "selftest");
+            Directory.CreateDirectory(shots);
+            int   capHalf = (int)(AppConstants.CanvasSize * s / 2f);
+
             Cursor(cx, cy);
             Ui(() => App.Overlay.OpenAtCursor(new System.Drawing.Point(cx, cy)));
             Sleep(600);
+            Shot(() => ScreenCapture.CaptureScreen(cx - capHalf, cy - capHalf, capHalf * 2, capHalf * 2,
+                Path.Combine(shots, "overlay-open.png")));
 
             for (int i = 0; i < Math.Min(n, 3); i++)
             {
                 var p = Slice(i); Cursor(p.X, p.Y); Sleep(500);   // hover slice i (opens child ring for submenus)
-                var c = ChildOf(i); Cursor(c.X, c.Y); Sleep(500); // sweep into its child ring zone
+                if (i == 0)
+                    Shot(() => ScreenCapture.CaptureScreen(cx - capHalf, cy - capHalf, capHalf * 2, capHalf * 2,
+                        Path.Combine(shots, "overlay-hover.png")));
+                var c = ChildOf(i); Cursor(c.X, c.Y); Sleep(600); // sweep into its child ring zone
+                if (i == 1)
+                    Shot(() => ScreenCapture.CaptureScreen(cx - capHalf, cy - capHalf, capHalf * 2, capHalf * 2,
+                        Path.Combine(shots, "overlay-child-ring.png")));
             }
 
             Cursor(cx + (int)(childMid * 2.5f), cy + (int)(childMid * 1.5f)); Sleep(200);
@@ -75,8 +88,10 @@ internal static class SelfTest
             foreach (var tag in UI.Views.SettingsWindow.PageTags)
             {
                 Ui(() => UI.Views.SettingsWindow.Instance?.NavigateTo(tag));
-                Sleep(500);
+                Sleep(700);
                 Logger.Debug($"SELFTEST: page '{tag}' shown");
+                Shot(() => ScreenCapture.CaptureWindow(UI.Views.SettingsWindow.WindowHandle,
+                    Path.Combine(shots, $"settings-{tag}.png")));
             }
             Sleep(500);
 
@@ -110,6 +125,12 @@ internal static class SelfTest
     }
 
     private static void Sleep(int ms) => Thread.Sleep(ms);
+
+    private static void Shot(Func<bool> capture)
+    {
+        try { Logger.Debug(capture() ? "SELFTEST: screenshot saved" : "SELFTEST: screenshot failed"); }
+        catch (Exception ex) { Logger.Warn("SELFTEST: screenshot threw", ex); }
+    }
 
     private static void Ui(Action a) => App.Tray.DispatcherQueue.TryEnqueue(() => a());
 }

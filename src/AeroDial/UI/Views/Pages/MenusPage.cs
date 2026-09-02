@@ -131,12 +131,20 @@ public sealed partial class MenusPage : Page
         var deleteMenuBtn = PageKit.DangerButton("Delete");
         deleteMenuBtn.Click += (_, _) => DeleteMenuAsync().FireAndForget();
 
+        var presetsFlyout = new MenuFlyout();
+        var loadPreset = new MenuFlyoutItem { Text = "Load a preset into this menu…" };
+        loadPreset.Click += (_, _) => LoadPresetAsync().FireAndForget();
+        var savePreset = new MenuFlyoutItem { Text = "Save this menu as a preset…" };
+        savePreset.Click += (_, _) => SaveAsPresetAsync().FireAndForget();
+        presetsFlyout.Items.Add(loadPreset);
+        presetsFlyout.Items.Add(savePreset);
+        var presetsBtn = new DropDownButton { Content = "Presets", Flyout = presetsFlyout };
+
         menuRow.Children.Add(_menuCombo);
-        menuRow.Children.Add(Btn("+ New",       AddMenu));
-        menuRow.Children.Add(Btn("Rename",      (s, e) => RenameMenuAsync().FireAndForget()));
+        menuRow.Children.Add(Btn("New",    AddMenu));
+        menuRow.Children.Add(Btn("Rename", (s, e) => RenameMenuAsync().FireAndForget()));
         menuRow.Children.Add(deleteMenuBtn);
-        menuRow.Children.Add(Btn("Presets…",    (s, e) => LoadPresetAsync().FireAndForget()));
-        menuRow.Children.Add(Btn("Save preset", (s, e) => SaveAsPresetAsync().FireAndForget()));
+        menuRow.Children.Add(presetsBtn);
         root.Children.Add(menuRow);
 
         // ── Breadcrumb (drill path) + profile-binding badge ──────────────

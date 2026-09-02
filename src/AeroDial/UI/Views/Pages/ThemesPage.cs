@@ -20,11 +20,11 @@ public sealed partial class ThemesPage : Page
     private void Build()
     {
         var outer = new Grid();
-        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(280) });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         // ── Left: theme list ──────────────────────────────────────────────
-        var leftScroll = new ScrollViewer { Padding = new Thickness(32, 24, 12, 24) };
+        var leftScroll = new ScrollViewer { Padding = new Thickness(28, 24, 8, 24) };
         var left = new StackPanel { Spacing = 6 };
         left.Children.Add(PageKit.PageHeader("Themes"));
 

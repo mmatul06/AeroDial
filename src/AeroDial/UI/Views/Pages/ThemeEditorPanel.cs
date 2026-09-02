@@ -55,53 +55,54 @@ public sealed partial class ThemeEditorPanel : UserControl
 
     private void Build()
     {
-        // Two-column layout: fields scroll left; preview pinned right.
-        var outerGrid = new Grid();
-        outerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        outerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
-
-        var scroll = new ScrollViewer { Padding = new Thickness(16, 24, 16, 32) };
+        // Single scrolling column (this panel sits beside the theme list, so width is limited).
+        var scroll = new ScrollViewer { Padding = new Thickness(8, 24, 24, 32) };
         var stack  = new StackPanel { Spacing = 6 };
 
-        stack.Children.Add(PageKit.PageHeader("Edit theme"));
+        // Header row: title + live preview side by side
+        var headRow = new Grid { ColumnSpacing = 16 };
+        headRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var headText = new StackPanel { Spacing = 4 };
+        headText.Children.Add(PageKit.PageHeader("Edit theme"));
         _sourceNote = Ui.Hint("");
-        stack.Children.Add(_sourceNote);
+        headText.Children.Add(_sourceNote);
 
         // ── Name / description ────────────────────────────────────────────
-        stack.Children.Add(PageKit.SubHeader("Identity"));
-        _nameBox = new TextBox { PlaceholderText = "My theme" };
-        _descBox = new TextBox { PlaceholderText = "A short description" };
+        headText.Children.Add(PageKit.SubHeader("Identity"));
+        _nameBox = new TextBox { PlaceholderText = "My theme", Header = "Name" };
+        _descBox = new TextBox { PlaceholderText = "A short description", Header = "Description" };
+        headText.Children.Add(_nameBox);
+        headText.Children.Add(_descBox);
+        Grid.SetColumn(headText, 0);
+        headRow.Children.Add(headText);
 
-        var identGrid = new Grid { ColumnSpacing = 12 };
-        identGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        identGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        var nameStack = new StackPanel { Spacing = 4 };
-        nameStack.Children.Add(new TextBlock { Text = "Name", FontSize = 12 });
-        nameStack.Children.Add(_nameBox);
-        var descStack = new StackPanel { Spacing = 4 };
-        descStack.Children.Add(new TextBlock { Text = "Description", FontSize = 12 });
-        descStack.Children.Add(_descBox);
-        Grid.SetColumn(nameStack, 0); identGrid.Children.Add(nameStack);
-        Grid.SetColumn(descStack, 1); identGrid.Children.Add(descStack);
-        stack.Children.Add(identGrid);
+        _previewCanvas = new SKXamlCanvas
+        {
+            Width = 180, Height = 180,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        _previewCanvas.PaintSurface += OnPreviewPaint;
+        Grid.SetColumn(_previewCanvas, 1);
+        headRow.Children.Add(_previewCanvas);
+        stack.Children.Add(headRow);
 
         // ── Color fields ──────────────────────────────────────────────────
         stack.Children.Add(PageKit.SubHeader("Colors"));
         stack.Children.Add(Ui.Hint("Click a swatch to pick, or type #AARRGGBB. Gradient fields may be empty to use the flat slice fill.", 11));
 
         var colorGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6, Margin = new Thickness(0, 4, 0, 0) };
-        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
-        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
-        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
         colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         for (int i = 0; i < ColorFields.Length; i++)
         {
             var (prop, label) = ColorFields[i];
-            int col = (i % 2) * 3;
-            int row = i / 2;
+            int col = 0;
+            int row = i;
             if (colorGrid.RowDefinitions.Count <= row)
                 colorGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -218,24 +219,7 @@ public sealed partial class ThemeEditorPanel : UserControl
         foreach (var fb in _floatBoxes.Values) fb.TextChanged += (_, _) => _previewCanvas?.Invalidate();
 
         scroll.Content = stack;
-        Grid.SetColumn(scroll, 0);
-        outerGrid.Children.Add(scroll);
-
-        // Right column: live preview pinned
-        var rightPanel = new StackPanel { Margin = new Thickness(0, 28, 24, 24), Spacing = 4 };
-        rightPanel.Children.Add(PageKit.SubHeader("Live preview"));
-        _previewCanvas = new SKXamlCanvas
-        {
-            Width  = 220, Height = 220,
-            Margin = new Thickness(0, 4, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Left,
-        };
-        _previewCanvas.PaintSurface += OnPreviewPaint;
-        rightPanel.Children.Add(_previewCanvas);
-        Grid.SetColumn(rightPanel, 1);
-        outerGrid.Children.Add(rightPanel);
-
-        Content = outerGrid;
+        Content = scroll;
     }
 
     // ── Load / save ───────────────────────────────────────────────────────

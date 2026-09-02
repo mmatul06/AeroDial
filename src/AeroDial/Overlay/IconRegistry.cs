@@ -69,10 +69,13 @@ internal static class IconRegistry
     /// exe/image icons which should render in their natural colors.</summary>
     public static bool IsBuiltIn(string? key) => FluentGlyphs.IsGlyphKey(key);
 
+    /// <param name="strokeScale">Glyph weight multiplier (theme IconStrokeScale); ignored for image icons.</param>
     public static SKBitmap? Get(string key, float strokeScale = 1f)
     {
         if (string.IsNullOrWhiteSpace(key)) return null;
-        string cacheKey = FluentGlyphs.Canonicalize(key.Trim());
+        string canonical = FluentGlyphs.Canonicalize(key.Trim());
+        bool   isGlyph   = FluentGlyphs.IsGlyphKey(canonical);
+        string cacheKey  = isGlyph && strokeScale != 1f ? $"{canonical}@{strokeScale:F2}" : canonical;
 
         lock (_lock)
         {
@@ -81,7 +84,7 @@ internal static class IconRegistry
 
         // Load outside the lock: exe icon extraction is shell I/O and must not stall a
         // render thread that only wants an already-cached bitmap.
-        var bmp = Load(cacheKey);
+        var bmp = Load(canonical, strokeScale);
 
         lock (_lock)
         {
@@ -157,11 +160,11 @@ internal static class IconRegistry
 
     // ── Loader ────────────────────────────────────────────────────────────
 
-    private static SKBitmap? Load(string key)
+    private static SKBitmap? Load(string key, float strokeScale)
     {
         // 1. System icon-font glyph?
         if (FluentGlyphs.TryResolve(key, out int codepoint))
-            return DrawGlyph(codepoint, GlyphBitmapSize);
+            return DrawGlyph(codepoint, GlyphBitmapSize, strokeScale);
 
         // 2. Absolute file path?
         if (Path.IsPathRooted(key) && File.Exists(key))
@@ -178,8 +181,11 @@ internal static class IconRegistry
         return DrawFallback(GlyphBitmapSize);
     }
 
-    /// <summary>Rasterizes one icon-font glyph, white on transparent, centered in a square.</summary>
-    private static SKBitmap DrawGlyph(int codepoint, int size)
+    /// <summary>Rasterizes one icon-font glyph, white on transparent, centered in a square.
+    /// Fluent glyphs are drawn as thin outlines by design; a stroke-and-fill pass thickens
+    /// them so they read on the ring at 22 px the way the old hand-drawn icons did.
+    /// The theme's IconStrokeScale scales that weight (1.0 = default).</summary>
+    private static SKBitmap DrawGlyph(int codepoint, int size, float strokeScale)
     {
         EnsureGlyphFont();
         if (_glyphTypeface is null) return DrawFallback(size);
@@ -188,13 +194,18 @@ internal static class IconRegistry
         using var canvas = new SKCanvas(bmp);
         canvas.Clear(SKColors.Transparent);
 
+        float weight = size * 0.024f * Math.Clamp(strokeScale, 0.2f, 3f);
         using var paint = new SKPaint
         {
             IsAntialias = true,
             Color       = SKColors.White,
             Typeface    = _glyphTypeface,
-            TextSize    = size * 0.72f, // glyphs sit inside the em box with margins already
+            TextSize    = size * 0.70f, // glyphs sit inside the em box with margins already
             TextAlign   = SKTextAlign.Center,
+            Style       = SKPaintStyle.StrokeAndFill,
+            StrokeWidth = weight,
+            StrokeJoin  = SKStrokeJoin.Round,
+            StrokeCap   = SKStrokeCap.Round,
         };
         string text = char.ConvertFromUtf32(codepoint);
         var bounds = new SKRect();
