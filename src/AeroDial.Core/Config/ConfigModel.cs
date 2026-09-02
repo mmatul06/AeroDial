@@ -119,6 +119,13 @@ public sealed class BehaviorConfig
 
     /// <summary>Arrow keys, digits, Enter, Backspace and Escape drive the dial while it is open.</summary>
     public bool KeyboardNavigation           { get; set; } = true;
+
+    /// <summary>Set after the one-time "AeroDial is running" tray notice has been shown.</summary>
+    public bool FirstRunShown                { get; set; } = false;
+
+    /// <summary>Check GitHub Releases once a day and show a tray notice when a newer version exists.</summary>
+    public bool CheckForUpdates              { get; set; } = true;
+    public DateTime LastUpdateCheckUtc       { get; set; } = DateTime.MinValue;
 }
 
 // ── Menu / Items ──────────────────────────────────────────────────────────────

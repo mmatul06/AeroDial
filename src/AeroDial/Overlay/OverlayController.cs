@@ -669,6 +669,22 @@ internal sealed class OverlayController : IDisposable
             Logger.Warn("Could not read clipboard history", ex);
         }
 
+        // Windows clipboard history is off (or access was denied): instead of an empty ring,
+        // offer the one thing the user can do about it.
+        bool historyOn = false;
+        try { historyOn = Windows.ApplicationModel.DataTransfer.Clipboard.IsHistoryEnabled(); }
+        catch { /* older builds — assume on */ historyOn = true; }
+        if (!historyOn && items.Count == 0)
+        {
+            items.Add(new MenuItemConfig
+            {
+                Label      = "Enable clipboard history",
+                Icon       = "fluent:clipboard",
+                ActionType = ActionType.RunCommand,
+                Command    = "ms-settings:clipboard",
+            });
+        }
+
         return new RadialMenuConfig
         {
             Id    = AppConstants.ClipboardHistoryMenuId,

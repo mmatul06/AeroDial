@@ -31,7 +31,7 @@ public sealed partial class BehaviorPage : Page
     private StackPanel   _dwellRow = null!;
 
     // Always-visible controls
-    private ToggleSwitch _close = null!, _startup = null!, _closeOutside = null!, _tapThrough = null!, _keyboardNav = null!;
+    private ToggleSwitch _close = null!, _startup = null!, _closeOutside = null!, _tapThrough = null!, _keyboardNav = null!, _updates = null!;
     private TextBlock    _saved = null!;
     private DispatcherTimer? _saveTimer;
 
@@ -170,6 +170,15 @@ public sealed partial class BehaviorPage : Page
         };
         stack.Children.Add(_startup);
 
+        _updates = new ToggleSwitch
+        {
+            Header     = "Check for updates once a day",
+            IsOn       = cfg.CheckForUpdates,
+            OnContent  = "On: a tray notice appears when a newer version is on GitHub",
+            OffContent = "Off",
+        };
+        stack.Children.Add(_updates);
+
         // ── Reset ─────────────────────────────────────────────────────────
         stack.Children.Add(PageKit.SubHeader("Reset"));
         stack.Children.Add(PageKit.InfoCard(
@@ -224,6 +233,7 @@ public sealed partial class BehaviorPage : Page
         _startup.Toggled        += (_, _) => ScheduleSave();
         _tapThrough.Toggled     += (_, _) => ScheduleSave();
         _keyboardNav.Toggled    += (_, _) => ScheduleSave();
+        _updates.Toggled        += (_, _) => ScheduleSave();
 
         _saved = PageKit.SavedBadge();
         _saved.Margin = new Thickness(0, 6, 0, 0);
@@ -258,6 +268,7 @@ public sealed partial class BehaviorPage : Page
             cfg.Behavior.StartWithWindows      = _startup.IsOn;
             cfg.Behavior.TapThrough            = _tapThrough.IsOn;
             cfg.Behavior.KeyboardNavigation    = _keyboardNav.IsOn;
+            cfg.Behavior.CheckForUpdates       = _updates.IsOn;
         });
         ApplyStartup(App.Config.Current.Behavior.StartWithWindows);
         _saved.Visibility = Visibility.Visible;

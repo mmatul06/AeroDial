@@ -78,7 +78,8 @@ public partial class App : Application
                     });
 
                 Logger.Info("AeroDial ready. Running in system tray.");
-                SelfTest.Start(); // no-op unless launched with --selftest
+                StartupNotices.Run(); // first-run hint, daily update check
+                SelfTest.Start();     // no-op unless launched with --selftest
             }
             catch (Exception ex)
             {

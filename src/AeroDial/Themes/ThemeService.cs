@@ -21,11 +21,40 @@ internal sealed class ThemeService
         Converters            = { new JsonStringEnumConverter() },
     };
 
+    private Windows.UI.ViewManagement.UISettings? _uiSettings;
+
     public ThemeService()
     {
         LoadBuiltIn();
         LoadUserThemes();
+        RegisterAccentTheme();
         Logger.Info($"ThemeService: {_themes.Count} theme(s) loaded.");
+    }
+
+    // ── "Auto (Windows accent)" ───────────────────────────────────────────
+    // Derived from the live Windows accent color and rebuilt whenever Windows changes it.
+
+    private void RegisterAccentTheme()
+    {
+        try
+        {
+            _uiSettings = new Windows.UI.ViewManagement.UISettings();
+            RebuildAccentTheme();
+            _uiSettings.ColorValuesChanged += (_, _) => RebuildAccentTheme();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("Windows accent theme unavailable", ex);
+        }
+    }
+
+    private void RebuildAccentTheme()
+    {
+        if (_uiSettings is null) return;
+        var c = _uiSettings.GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent);
+        var theme = AccentThemeBuilder.Build(new SkiaSharp.SKColor(c.R, c.G, c.B));
+        theme.IsBuiltIn = true;
+        _themes[theme.Name] = theme;
     }
 
     // ── Public API ────────────────────────────────────────────────────────

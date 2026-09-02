@@ -62,6 +62,30 @@ internal static class Pickers
         finally { Interlocked.Exchange(ref _open, 0); }
     }
 
+    /// <summary>Shows a save-file dialog. Returns the chosen path, or null if cancelled or failed.</summary>
+    public static async Task<string?> PickSaveFileAsync(string suggestedName, string typeLabel, string extension)
+    {
+        if (Interlocked.CompareExchange(ref _open, 1, 0) != 0) return null;
+        try
+        {
+            var picker = new FileSavePicker(WindowId())
+            {
+                SuggestedFileName      = suggestedName,
+                SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            };
+            picker.FileTypeChoices.Add(typeLabel, new List<string> { extension });
+            var result = await picker.PickSaveFileAsync();
+            return string.IsNullOrEmpty(result?.Path) ? null : result!.Path;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Save picker failed", ex);
+            App.Tray.ShowBalloon("Couldn't open the save dialog", ex.Message);
+            return null;
+        }
+        finally { Interlocked.Exchange(ref _open, 0); }
+    }
+
     private static WindowId WindowId()
         => Win32Interop.GetWindowIdFromWindow(SettingsWindow.WindowHandle);
 }

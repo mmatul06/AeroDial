@@ -1,3 +1,49 @@
+## AeroDial v3.0.0
+
+The biggest AeroDial release yet: a rebuilt input and rendering core, a Windows 11 native settings window, a system icon font with hundreds of icons, two new action types, and a long list of quality-of-life fixes reported by users.
+
+---
+
+### Fixed
+
+- **Crash when choosing an icon or app path** in the menu editor. The file picker threw inside an async handler and took the whole app down without a log entry. Pickers now use the Windows App SDK picker API, every handler is guarded, and XAML exceptions are logged instead of terminating the process. A crash that does slip through now writes its FATAL line to the log before exiting.
+- **Overlay froze while an app launched.** Actions used to run *before* the ring closed, on the render thread. The ring now closes first and shell launches run on a background thread, so the dial collapses instantly no matter how slow the app starts.
+- **Middle-click in browsers was broken** while AeroDial ran with a middle-mouse trigger. New **tap-through**: a quick tap is passed to the app as a normal click; holding (or dragging) opens the dial. On by default for mouse triggers in Hold mode.
+- Child rings, hover state and navigation now run on a single thread; the class of "child ring looks different depending on how you got there" bugs is gone at the root.
+
+### Performance
+
+- Active Apps is built only when a menu uses it, on a background thread, with exe icons extracted there too. Opening the dial no longer waits on `EnumWindows` and process lookups.
+- The ring is rasterized only when something changes; idle frames just re-composite a cached layer (idle CPU drops from a constant ~125 fps redraw to a light ~24 fps tick).
+- Gradient shaders are no longer churned during animations; theme colors are parsed once; audio device changes come from a WASAPI notification instead of re-creating COM objects every two seconds on the render thread.
+
+### New
+
+- **Open folder** action (Explorer, or select a file) and **Run command** action with Win+R semantics (`regedit`, `ms-settings:display`, `cmd /k dir`, `shell:startup`, `%APPDATA%`), including an optional **Run as administrator** switch.
+- **System icon font**: icons are now Segoe Fluent Icons glyphs (Segoe MDL2 Assets on Windows 10) with a searchable picker of 120 named icons, and any glyph by hex code (`fluent:E8B7`). Existing configs are migrated automatically; exe and image icons are unchanged.
+- **Keyboard navigation** while the dial is open: arrows move the highlight (child rings open as you go), 1-9 pick a slice, Enter runs, Backspace goes back, Escape closes. The keys never reach the app underneath.
+- **Pause AeroDial** in the tray menu, and app profiles can now target **Disabled**, so the trigger passes straight through in games or apps that use it themselves.
+- **Slices per ring** is now a 3 to 12 slider.
+- **Export / Import** (Advanced page): menus, profiles, settings and custom themes in one file.
+- **Auto (Windows accent)** theme that follows your desktop accent color.
+- First-run tray hint, and an optional daily update check with a tray notice.
+- Clipboard History shows an "Enable clipboard history" slice that opens the Windows setting when history is off, instead of an empty ring.
+
+### Settings window
+
+- Rebuilt as a **Windows 11 native** window: Mica backdrop, navigation rail with icons, and every color from the system theme, so it follows light/dark mode and your accent color.
+- Eight pages instead of ten: scroll-wheel bindings moved into the slice editor, and Themes and Theme Editor merged into one page with a live preview (built-in themes can be duplicated and edited).
+- Friendly action names ("Launch app", "Open folder", ...) with descriptions, and each action type comes with a sensible default icon.
+- Presets moved into a dropdown; long labels no longer overflow.
+
+### Under the hood
+
+- Config files carry a schema version and are migrated on load; the previous file is kept as `config.json.bak`, and an unreadable file is set aside instead of overwritten.
+- New `AeroDial.Core` library holds the models and pure logic (key-combo parsing, ring geometry, profile matching, migrations) with a unit test suite.
+- `AeroDial.exe --selftest` drives the overlay and every settings page and saves screenshots, for release verification.
+
+---
+
 ## AeroDial v2.0.0
 
 A major update to AeroDial, the customisable radial launcher overlay for Windows. This release adds keyboard macros, per-app menu profiles, and a live now-playing display, alongside a ground-up redesign of the menu editor, a batch of visual fixes, and a rendering-performance pass.

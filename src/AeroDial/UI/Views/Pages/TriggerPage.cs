@@ -199,7 +199,7 @@ public sealed partial class TriggerPage : Page
         Save(null!, null!);
     }
 
-    private static string VkName(int vk) => vk switch
+    internal static string VkName(int vk) => vk switch
     {
         0x01 => "Left mouse",     0x02 => "Right mouse",
         0x04 => "Middle mouse",      0x05 => "Mouse Button 4",

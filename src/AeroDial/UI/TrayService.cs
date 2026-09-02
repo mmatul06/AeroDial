@@ -41,9 +41,10 @@ internal sealed class TrayService : IDisposable
         Logger.Info("TrayService initialized.");
     }
 
-    /// <summary>Show a tray balloon notification (used to surface action failures to the user).</summary>
-    public void ShowBalloon(string title, string message)
-        => _trayWindow?.ShowBalloon(title, message);
+    /// <summary>Show a tray balloon notification (used to surface action failures to the user).
+    /// <paramref name="onClick"/> runs on the UI thread if the user clicks the balloon.</summary>
+    public void ShowBalloon(string title, string message, Action? onClick = null, bool warning = true)
+        => _trayWindow?.ShowBalloon(title, message, onClick, warning);
 
     /// <summary>Pauses or resumes the dial: hooks pass everything through while paused.</summary>
     public void SetPaused(bool paused)
@@ -213,14 +214,19 @@ internal sealed class TrayWindow
 
     // Balloon notification. Identified by hWnd+uID, so this is safe to call from
     // any thread — the shell delivers it and routes clicks back to _hwnd's WndProc.
-    public void ShowBalloon(string title, string message)
+    private Action? _balloonClick;
+    private const uint NIIF_INFO = 0x01;
+    private const uint NIN_BALLOONUSERCLICK = 0x0405;
+
+    public void ShowBalloon(string title, string message, Action? onClick, bool warning)
     {
         if (_hwnd == 0) return;
+        _balloonClick = onClick;
         var nid = MakeNID();
         nid.uFlags      = NIF_INFO;
         nid.szInfoTitle = title.Length   > 63  ? title[..63]    : title;
         nid.szInfo      = message.Length > 255 ? message[..255] : message;
-        nid.dwInfoFlags = NIIF_WARNING;
+        nid.dwInfoFlags = warning ? NIIF_WARNING : NIIF_INFO;
         Shell_NotifyIcon(NIM_MODIFY, ref nid);
     }
 
@@ -250,6 +256,12 @@ internal sealed class TrayWindow
                 ShowContextMenu();
             else if (note == (uint)WM_LBUTTONDBLCLK)
                 _dispatcher.TryEnqueue(() => SettingsWindow.ShowOrActivate());
+            else if (note == NIN_BALLOONUSERCLICK)
+            {
+                var action = _balloonClick;
+                _balloonClick = null;
+                if (action is not null) _dispatcher.TryEnqueue(() => action());
+            }
             return 0;
         }
 

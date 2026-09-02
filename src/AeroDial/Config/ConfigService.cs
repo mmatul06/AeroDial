@@ -112,6 +112,87 @@ internal sealed class ConfigService
         }
     }
 
+    // ── Export / import ───────────────────────────────────────────────────
+
+    /// <summary>Everything a user would want to move to another machine: menus, app
+    /// profiles, appearance and behavior settings, and their custom theme files.</summary>
+    public sealed class SettingsBundle
+    {
+        public int    BundleVersion { get; set; } = 1;
+        public string AppVersion    { get; set; } = AppConstants.Version;
+        public DateTime ExportedUtc { get; set; } = DateTime.UtcNow;
+        public List<RadialMenuConfig> Menus       { get; set; } = [];
+        public string                 ActiveMenuId { get; set; } = "default";
+        public List<AppProfileConfig> AppProfiles { get; set; } = [];
+        public TriggerConfig?         Trigger     { get; set; }
+        public AppearanceConfig?      Appearance  { get; set; }
+        public BehaviorConfig?        Behavior    { get; set; }
+        /// <summary>User theme name → theme JSON text.</summary>
+        public Dictionary<string, string> UserThemes { get; set; } = new();
+    }
+
+    public async Task ExportBundleAsync(string path)
+    {
+        var bundle = new SettingsBundle
+        {
+            Menus        = Current.Menus,
+            ActiveMenuId = Current.ActiveMenuId,
+            AppProfiles  = Current.AppProfiles,
+            Trigger      = Current.Trigger,
+            Appearance   = Current.Appearance,
+            Behavior     = Current.Behavior,
+        };
+        if (Directory.Exists(AppConstants.UserThemesDir))
+            foreach (var f in Directory.EnumerateFiles(AppConstants.UserThemesDir, "*.json"))
+                bundle.UserThemes[Path.GetFileNameWithoutExtension(f)] = await File.ReadAllTextAsync(f);
+
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(bundle, s_jsonOptions));
+        Logger.Info($"Settings exported to {path}");
+    }
+
+    /// <summary>Imports a bundle. Menus and profiles replace the current ones (a backup of the
+    /// current config is written first); trigger/appearance/behavior are applied when present.
+    /// Returns the number of menus imported.</summary>
+    public async Task<int> ImportBundleAsync(string path, bool includeSettings)
+    {
+        var json   = await File.ReadAllTextAsync(path);
+        var bundle = JsonSerializer.Deserialize<SettingsBundle>(json, s_jsonOptions)
+                     ?? throw new JsonException("Not an AeroDial settings file.");
+        if (bundle.Menus.Count == 0) throw new JsonException("The file contains no menus.");
+
+        // Migrate icon names etc. the same way config.json is migrated.
+        foreach (var m in bundle.Menus)
+            foreach (var i in m.Items)
+                i.Icon = FluentGlyphs.Canonicalize(i.Icon ?? "");
+
+        if (File.Exists(AppConstants.ConfigPath))
+            File.Copy(AppConstants.ConfigPath, AppConstants.ConfigBackupPath, overwrite: true);
+
+        Directory.CreateDirectory(AppConstants.UserThemesDir);
+        foreach (var (name, themeJson) in bundle.UserThemes)
+        {
+            var safe = string.Concat(name.Split(Path.GetInvalidFileNameChars()));
+            if (safe.Length == 0) continue;
+            await File.WriteAllTextAsync(Path.Combine(AppConstants.UserThemesDir, safe + ".json"), themeJson);
+        }
+
+        await UpdateAsync(cfg =>
+        {
+            cfg.Menus        = bundle.Menus;
+            cfg.ActiveMenuId = bundle.Menus.Any(m => m.Id == bundle.ActiveMenuId) ? bundle.ActiveMenuId : bundle.Menus[0].Id;
+            cfg.AppProfiles  = bundle.AppProfiles;
+            if (includeSettings)
+            {
+                if (bundle.Trigger    is not null) cfg.Trigger    = bundle.Trigger;
+                if (bundle.Appearance is not null) cfg.Appearance = bundle.Appearance;
+                if (bundle.Behavior   is not null) cfg.Behavior   = bundle.Behavior;
+            }
+            Sanitize(cfg);
+        });
+        Logger.Info($"Settings imported from {path}: {bundle.Menus.Count} menu(s), {bundle.UserThemes.Count} theme(s)");
+        return bundle.Menus.Count;
+    }
+
     // ── Mutation helpers ─────────────────────────────────────────────────
 
     /// <summary>Apply a mutation, persist, and raise ConfigChanged.</summary>

@@ -66,6 +66,53 @@ public sealed partial class AdvancedPage : Page
             "making the parent-child relationship visually clear. " +
             "With 8+ items it automatically falls back to full 360°."));
 
+        // ── Backup ────────────────────────────────────────────────────────
+        stack.Children.Add(PageKit.SubHeader("Backup"));
+        stack.Children.Add(Ui.Hint("Export your menus, app profiles, settings, and custom themes to one file; import it on another PC or after a reinstall."));
+        var backupRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+        var exportBtn = new Button { Content = "Export settings…" };
+        var importBtn = new Button { Content = "Import settings…" };
+        var backupStatus = Ui.Hint("");
+        exportBtn.Click += async (_, _) =>
+        {
+            try
+            {
+                var path = await Pickers.PickSaveFileAsync($"AeroDial-settings-{DateTime.Now:yyyy-MM-dd}", "AeroDial settings", ".aerodial.json");
+                if (path is null) return;
+                await App.Config.ExportBundleAsync(path);
+                backupStatus.Text = $"Exported to {path}";
+            }
+            catch (Exception ex) { Logger.Error("Export failed", ex); backupStatus.Text = "Export failed: " + ex.Message; }
+        };
+        importBtn.Click += async (_, _) =>
+        {
+            try
+            {
+                var path = await Pickers.PickFileAsync(".json");
+                if (path is null) return;
+                var dlg = new ContentDialog
+                {
+                    Title             = "Import settings",
+                    Content           = "This replaces your menus and app profiles with the ones in the file " +
+                                        "(a backup of the current config is kept as config.json.bak). " +
+                                        "Also apply the trigger, appearance, and behavior settings from the file?",
+                    PrimaryButtonText   = "Import everything",
+                    SecondaryButtonText = "Menus and profiles only",
+                    CloseButtonText     = "Cancel",
+                    XamlRoot            = XamlRoot,
+                };
+                var r = await dlg.ShowAsync();
+                if (r == ContentDialogResult.None) return;
+                int n = await App.Config.ImportBundleAsync(path, includeSettings: r == ContentDialogResult.Primary);
+                backupStatus.Text = $"Imported {n} menu(s). Reopen Settings to see the updated pages.";
+            }
+            catch (Exception ex) { Logger.Error("Import failed", ex); backupStatus.Text = "Import failed: " + ex.Message; }
+        };
+        backupRow.Children.Add(exportBtn);
+        backupRow.Children.Add(importBtn);
+        stack.Children.Add(backupRow);
+        stack.Children.Add(backupStatus);
+
         // ── Developer ─────────────────────────────────────────────────────
         stack.Children.Add(PageKit.SubHeader("Developer"));
         _debugLog = new ToggleSwitch
