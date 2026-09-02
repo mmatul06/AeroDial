@@ -18,6 +18,12 @@
     <Copyright>Copyright © 2026 Muhtasim Mahbub | 3M Design Solutions</Copyright>
   </PropertyGroup>
 
+  <!-- Keep the published folder to a single exe: no symbols next to it in Release -->
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
   </ItemGroup>
