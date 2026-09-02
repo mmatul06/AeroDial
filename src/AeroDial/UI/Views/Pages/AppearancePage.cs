@@ -22,9 +22,8 @@ namespace AeroDial.UI.Views.Pages;
 
 public sealed partial class AppearancePage : Page
 {
-    private Slider       _scale = null!, _gap = null!, _opacity = null!, _detach = null!;
+    private Slider       _scale = null!, _gap = null!, _opacity = null!, _detach = null!, _slices = null!;
     private ToggleSwitch _anim = null!, _sysAnim = null!, _nowPlaying = null!, _visualizer = null!;
-    private RadioButton  _slice4 = null!, _slice6 = null!, _slice8 = null!, _slice10 = null!, _slice12 = null!;
     private ComboBox     _volVisibility = null!;
     private TextBlock    _saved = null!;
     private DispatcherTimer? _saveTimer;
@@ -45,23 +44,13 @@ public sealed partial class AppearancePage : Page
 
         stack.Children.Add(PageKit.PageHeader("Appearance"));
 
-        // Slice count
-        stack.Children.Add(PageKit.SubHeader("Slice count"));
-
-        int curSlices = cfg.SliceCount;
-        _slice4  = new RadioButton { Content = "4",  GroupName = "SliceCount", IsChecked = curSlices == 4  };
-        _slice6  = new RadioButton { Content = "6",  GroupName = "SliceCount", IsChecked = curSlices == 6  };
-        _slice8  = new RadioButton { Content = "8",  GroupName = "SliceCount", IsChecked = curSlices == 8  };
-        _slice10 = new RadioButton { Content = "10", GroupName = "SliceCount", IsChecked = curSlices == 10 };
-        _slice12 = new RadioButton { Content = "12", GroupName = "SliceCount",
-            IsChecked = curSlices != 4 && curSlices != 6 && curSlices != 8 && curSlices != 10 };
-        var sliceRow = new StackPanel { Orientation = Orientation.Vertical, Spacing = 4 };
-        sliceRow.Children.Add(_slice4);
-        sliceRow.Children.Add(_slice6);
-        sliceRow.Children.Add(_slice8);
-        sliceRow.Children.Add(_slice10);
-        sliceRow.Children.Add(_slice12);
-        stack.Children.Add(sliceRow);
+        // Slice count (3 to 12; the ring geometry is fully generic)
+        stack.Children.Add(PageKit.SubHeader("Slices"));
+        _slices = PageKit.MakeSlider("Slices per ring", 3, 12, 1, Math.Clamp(cfg.SliceCount, 3, 12));
+        _slices.TickFrequency = 1;
+        _slices.TickPlacement = Microsoft.UI.Xaml.Controls.Primitives.TickPlacement.BottomRight;
+        _slices.SnapsTo       = Microsoft.UI.Xaml.Controls.Primitives.SliderSnapsTo.StepValues;
+        stack.Children.Add(_slices);
 
         // Sliders — compact 2-column grid
         stack.Children.Add(PageKit.SubHeader("Ring properties"));
@@ -134,11 +123,7 @@ public sealed partial class AppearancePage : Page
             sl.ValueChanged += (_, _) => WireChange();
         _anim.Toggled    += (_, _) => WireChange();
         _sysAnim.Toggled += (_, _) => WireChange();
-        _slice4.Checked              += (_, _) => WireChange();
-        _slice6.Checked              += (_, _) => WireChange();
-        _slice8.Checked              += (_, _) => WireChange();
-        _slice10.Checked             += (_, _) => WireChange();
-        _slice12.Checked             += (_, _) => WireChange();
+        _slices.ValueChanged += (_, _) => WireChange();
         _volVisibility.SelectionChanged += (_, _) => WireChange();
         _nowPlaying.Toggled += (_, _) => WireChange();
         _visualizer.Toggled += (_, _) => WireChange();
@@ -174,10 +159,7 @@ public sealed partial class AppearancePage : Page
         {
             cfg.Appearance.Scale                        = (float)_scale.Value;
             cfg.Appearance.GapDegrees                   = (float)_gap.Value;
-            cfg.Appearance.SliceCount                   = _slice4.IsChecked  == true ? 4
-                                                        : _slice6.IsChecked  == true ? 6
-                                                        : _slice8.IsChecked  == true ? 8
-                                                        : _slice10.IsChecked == true ? 10 : 12;
+            cfg.Appearance.SliceCount                   = Math.Clamp((int)Math.Round(_slices.Value), 3, 12);
             cfg.Appearance.RingOpacity                  = (float)_opacity.Value;
             cfg.Appearance.RingInnerDetach              = (float)_detach.Value;
             cfg.Appearance.AnimationsEnabled            = _anim.IsOn;
@@ -218,10 +200,7 @@ public sealed partial class AppearancePage : Page
         float outerR   = minDim * 0.42f;
         float innerR   = minDim * 0.18f + (float)(_detach?.Value ?? 0) * 0.4f;
 
-        int   sliceCount = _slice4?.IsChecked  == true ? 4
-                         : _slice6?.IsChecked  == true ? 6
-                         : _slice8?.IsChecked  == true ? 8
-                         : _slice10?.IsChecked == true ? 10 : 12;
+        int   sliceCount = Math.Clamp((int)Math.Round(_slices?.Value ?? 8), 3, 12);
         float gapDeg     = (float)(_gap?.Value ?? AppConstants.DefaultGapDegrees);
         float fullArc    = 360f / sliceCount;
         float sweep      = fullArc - gapDeg;

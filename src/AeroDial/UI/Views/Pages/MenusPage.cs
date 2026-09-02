@@ -46,18 +46,23 @@ public sealed partial class MenusPage : Page
     // Editor card
     private Border        _editorCard  = null!;
     private TextBox       _labelBox    = null!, _iconBox    = null!;
-    private ComboBox      _actionCombo = null!, _iconCombo  = null!;
+    private ComboBox      _actionCombo = null!;
     private SKXamlCanvas? _iconPreview;
+    private Flyout?       _iconPickerFlyout;
     private bool          _recordingCombo;
     private TextBox?      _comboCaptureBox;
     private CheckBox?     _comboCtrl, _comboAlt, _comboShift, _comboWin;
+    private ActionType    _paneActionType = ActionType.None; // type the panes currently show
 
     // Payload panes (shown/hidden based on selected ActionType)
     private StackPanel _appPane    = null!, _urlPane   = null!, _comboPane  = null!,
                        _mediaPane  = null!, _subPane   = null!, _scriptPane = null!,
-                       _clipPane   = null!, _macroPane = null!;
+                       _clipPane   = null!, _macroPane = null!, _folderPane = null!,
+                       _commandPane = null!;
     private TextBox    _appPath    = null!, _appArgs   = null!, _urlBox     = null!,
-                       _comboBox   = null!, _scriptBox = null!, _clipBox    = null!;
+                       _comboBox   = null!, _scriptBox = null!, _clipBox    = null!,
+                       _folderPath = null!, _commandBox = null!;
+    private CheckBox   _runAsAdmin = null!;
     private ComboBox   _mediaCombo = null!, _subMenuSel = null!;
 
     // Macro editor (step list) working state for the currently-edited item
@@ -72,10 +77,11 @@ public sealed partial class MenusPage : Page
     private StackPanel _crumbBar = null!;
     private Border     _profileBadge = null!;
 
-    private static readonly string[] EditableActionTypes =
-        ["None", "LaunchApp", "OpenUrl", "KeyCombo", "Macro", "Media", "RunScript", "PasteClipboard", "SubMenu", "OpenSettings"];
-
     private static readonly string[] MacroStepNames = ["Type text", "Press key", "Key down", "Key up", "Delay"];
+
+    /// <summary>Action type currently chosen in the editor combo (items carry the enum in Tag).</summary>
+    private ActionType? SelectedAction
+        => _actionCombo.SelectedItem is ComboBoxItem ci && ci.Tag is ActionType at ? at : null;
 
     public MenusPage()
     {
@@ -252,135 +258,19 @@ public sealed partial class MenusPage : Page
         _iconPreview = new SKXamlCanvas { Width = 40, Height = 40, VerticalAlignment = VerticalAlignment.Center };
         _iconPreview.PaintSurface += OnIconPreviewPaint;
 
-        _iconBox = new TextBox { PlaceholderText = "icon name or file path", Width = 140 };
+        _iconBox = new TextBox { PlaceholderText = "fluent:name, or a file path", Width = 140 };
         _iconBox.TextChanged += (_, _) => _iconPreview?.Invalidate();
 
-        // Keep _iconCombo initialised (used in LoadEditor) but don't add it to the visual tree
-        _iconCombo = new ComboBox();
-        foreach (var n in new[]
-        {
-            "media","apps","vol_up","vol_down","mute","play","settings","desktop",
-            "next","prev","url","script","clipboard","default",
-            "power","lock","folder","copy","paste","home","search","mic",
-            "close","camera","keyboard","refresh","send","star",
-            "pause","stop","back","forward","minimize","zoom_in","zoom_out",
-            "trash","edit","download","upload","check","plus","minus",
-            "tag","share","list","info","wifi","bluetooth","brightness",
-            "clock","alarm","calendar","sleep","screenshot",
-        })
-            _iconCombo.Items.Add(n);
-
-        // "Built-in icons…" button — opens a flyout with a single SKXamlCanvas rendering all icons.
-        // One canvas per flyout open, drawing a 6-column grid of icon tiles with hover highlight.
-        string[] allIcons =
-        [
-            "media","apps","vol_up","vol_down","mute","play","settings","desktop",
-            "next","prev","url","script","clipboard","default",
-            "power","lock","folder","copy","paste","home","search","mic",
-            "close","camera","keyboard","refresh","send","star",
-            "pause","stop","back","forward","minimize","zoom_in","zoom_out",
-            "trash","edit","download","upload","check","plus","minus",
-            "tag","share","list","info","wifi","bluetooth","brightness",
-            "clock","alarm","calendar","sleep","screenshot",
-        ];
-        const int iconCols   = 6;
-        const int iconCellPx = 48;  // logical pixels per icon cell
-        int iconRows = (allIcons.Length + iconCols - 1) / iconCols;
-        int gridW    = iconCols * iconCellPx;
-        int gridH    = iconRows * iconCellPx;
-
-        Flyout? iconPickerFlyout = null;
-        var pickBtn = new Button { Content = "Built-in…", Padding = new Thickness(8, 4, 8, 4) };
+        // Searchable grid of system icon-font glyphs (see FluentGlyphs)
+        var pickBtn = new Button { Content = "Choose…", Padding = new Thickness(8, 4, 8, 4) };
         pickBtn.Click += (_, _) =>
         {
-            if (iconPickerFlyout is null)
-            {
-                // Single canvas renders the entire icon grid; hover and click handled via pointer events.
-                int hoveredCell = -1;
-                var iconCanvas  = new SKXamlCanvas { Width = gridW, Height = gridH };
-
-                void Repaint() => iconCanvas.Invalidate();
-
-                iconCanvas.PaintSurface += (_, pe) =>
-                {
-                    var c = pe.Surface.Canvas;
-                    c.Clear(new SKColor(28, 28, 40, 255));
-
-                    var theme = App.Themes.ActiveTheme;
-                    var tint  = theme.ToSKColor(theme.IconTint);
-                    float dpi = (float)(pe.Info.Width / gridW);
-
-                    for (int idx = 0; idx < allIcons.Length; idx++)
-                    {
-                        int col = idx % iconCols, row = idx / iconCols;
-                        float x = col * iconCellPx * dpi, y = row * iconCellPx * dpi;
-                        float cellPx = iconCellPx * dpi;
-
-                        // Hover highlight
-                        if (idx == hoveredCell)
-                        {
-                            using var hlPaint = new SKPaint { Color = new SKColor(100, 90, 200, 60) };
-                            c.DrawRect(x, y, cellPx, cellPx, hlPaint);
-                        }
-
-                        var bmp = IconRegistry.Get(allIcons[idx]);
-                        if (bmp is null) continue;
-
-                        float pad  = cellPx * 0.18f;
-                        var   dest = new SKRect(x + pad, y + pad, x + cellPx - pad, y + cellPx - pad);
-                        using var ip = new SKPaint
-                        {
-                            IsAntialias = true,
-                            FilterQuality = SKFilterQuality.High,
-                            ColorFilter = SKColorFilter.CreateBlendMode(
-                                tint.WithAlpha((byte)(idx == hoveredCell ? 255 : 200)), SKBlendMode.Modulate),
-                        };
-                        c.DrawBitmap(bmp, dest, ip);
-                    }
-                };
-
-                iconCanvas.PointerMoved += (_, me) =>
-                {
-                    var pt  = me.GetCurrentPoint(iconCanvas).Position;
-                    int col = (int)(pt.X / iconCellPx);
-                    int row = (int)(pt.Y / iconCellPx);
-                    int idx = row * iconCols + col;
-                    int newHov = (idx >= 0 && idx < allIcons.Length && col < iconCols) ? idx : -1;
-                    if (newHov != hoveredCell) { hoveredCell = newHov; Repaint(); }
-                };
-
-                iconCanvas.PointerExited += (_, _) => { hoveredCell = -1; Repaint(); };
-
-                iconCanvas.PointerReleased += (_, me) =>
-                {
-                    var pt  = me.GetCurrentPoint(iconCanvas).Position;
-                    int col = (int)(pt.X / iconCellPx);
-                    int row = (int)(pt.Y / iconCellPx);
-                    int idx = row * iconCols + col;
-                    if (idx >= 0 && idx < allIcons.Length && col < iconCols)
-                    {
-                        _iconBox.Text = allIcons[idx];
-                        iconPickerFlyout?.Hide();
-                    }
-                };
-
-                iconPickerFlyout = new Flyout
-                {
-                    Content = new ScrollViewer
-                    {
-                        Content = iconCanvas,
-                        MaxHeight = 320,
-                        VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
-                        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                    },
-                    ShouldConstrainToRootBounds = false,
-                    Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom,
-                };
-            }
-            iconPickerFlyout.ShowAt(pickBtn);
+            _iconPickerFlyout ??= BuildIconPickerFlyout();
+            _iconPickerFlyout.ShowAt(pickBtn);
         };
 
         var browseBtn = new Button { Content = "Browse…", Padding = new Thickness(8, 4, 8, 4) };
+        ToolTipService.SetToolTip(browseBtn, "Use an image file (.png, .jpg, .ico, .bmp)");
         browseBtn.Click += BrowseIconAsync;
 
         iconRow.Children.Add(_iconPreview);
@@ -389,10 +279,15 @@ public sealed partial class MenusPage : Page
         iconRow.Children.Add(browseBtn);
         s.Children.Add(iconRow);
 
-        // Action type
+        // Action type (friendly labels; the enum rides along in Tag)
         s.Children.Add(new TextBlock { Text = "Action type", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
         _actionCombo = new ComboBox { Width = 260 };
-        foreach (var n in EditableActionTypes) _actionCombo.Items.Add(n);
+        foreach (var a in ActionCatalog.Editable)
+        {
+            var item = new ComboBoxItem { Content = a.Label, Tag = a.Type };
+            ToolTipService.SetToolTip(item, a.Description);
+            _actionCombo.Items.Add(item);
+        }
         _actionCombo.SelectionChanged += OnActionTypeChanged;
         s.Children.Add(_actionCombo);
 
@@ -421,6 +316,36 @@ public sealed partial class MenusPage : Page
         _appPane.Children.Add(new TextBlock { Text = "Arguments (optional)", FontSize = 12 });
         _appArgs = new TextBox { PlaceholderText = "command line args" };
         _appPane.Children.Add(_appArgs);
+
+        _folderPane = Pane();
+        _folderPane.Children.Add(new TextBlock { Text = "Folder path", FontSize = 12 });
+        var folderRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        _folderPath = new TextBox { PlaceholderText = @"C:\Users\you\Documents  or  %USERPROFILE%\Downloads", Width = 260 };
+        var browseFolderBtn = new Button { Content = "Browse…", Padding = new Thickness(8, 4, 8, 4) };
+        browseFolderBtn.Click += BrowseFolderAsync;
+        folderRow.Children.Add(_folderPath);
+        folderRow.Children.Add(browseFolderBtn);
+        _folderPane.Children.Add(folderRow);
+        _folderPane.Children.Add(new TextBlock
+        {
+            Text = "Opens in File Explorer. A file path selects that file in its folder.",
+            FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+        });
+
+        _commandPane = Pane();
+        _commandPane.Children.Add(new TextBlock { Text = "Command", FontSize = 12 });
+        _commandBox = new TextBox { PlaceholderText = "regedit    ms-settings:display    cmd /k dir    shell:startup" };
+        _commandPane.Children.Add(_commandBox);
+        _runAsAdmin = new CheckBox { Content = "Run as administrator", Margin = new Thickness(0, 2, 0, 0) };
+        _commandPane.Children.Add(_runAsAdmin);
+        _commandPane.Children.Add(new TextBlock
+        {
+            Text = "Works like the Windows Run box (Win+R): programs, URIs, shell: folders, and %VARIABLES%. " +
+                   "Run as administrator shows a UAC prompt.",
+            FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+        });
 
         _urlPane = Pane();
         _urlPane.Children.Add(new TextBlock { Text = "URL", FontSize = 12 });
@@ -512,6 +437,68 @@ public sealed partial class MenusPage : Page
 
         card.Child = s;
         return card;
+    }
+
+    /// <summary>Searchable grid of every curated icon-font glyph. Click a tile to use it.</summary>
+    private Flyout BuildIconPickerFlyout()
+    {
+        var flyout = new Flyout
+        {
+            ShouldConstrainToRootBounds = false,
+            Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom,
+        };
+
+        var family = new FontFamily(IconRegistry.GlyphFontFamily);
+        var search = new TextBox { PlaceholderText = "Search icons (name or keyword)", Width = 344 };
+        var grid   = new GridView
+        {
+            Width = 344, MaxHeight = 300,
+            SelectionMode = ListViewSelectionMode.None,
+            IsItemClickEnabled = true,
+        };
+
+        void Fill(string? query)
+        {
+            grid.Items.Clear();
+            foreach (var g in FluentGlyphs.Search(query))
+            {
+                var tile = new Border
+                {
+                    Width = 40, Height = 40, Tag = g.Key,
+                    Child = new FontIcon
+                    {
+                        Glyph = g.Text, FontFamily = family, FontSize = 20,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment   = VerticalAlignment.Center,
+                    },
+                };
+                ToolTipService.SetToolTip(tile, g.Name);
+                grid.Items.Add(tile);
+            }
+        }
+        Fill(null);
+        search.TextChanged += (_, _) => Fill(search.Text);
+        grid.ItemClick += (_, e) =>
+        {
+            if (e.ClickedItem is Border b && b.Tag is string key)
+            {
+                _iconBox.Text = key;
+                flyout.Hide();
+            }
+        };
+
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(search);
+        panel.Children.Add(grid);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Any glyph from the Segoe Fluent Icons font works: type fluent:E8B7 (its hex code) in the icon box.",
+            FontSize = 11, TextWrapping = TextWrapping.Wrap, Width = 344,
+            Foreground = new SolidColorBrush(ColorHelper.FromArgb(150, 200, 200, 220)),
+        });
+        flyout.Content = panel;
+        flyout.Opened += (_, _) => search.Focus(FocusState.Programmatic);
+        return flyout;
     }
 
     // ── Menu management ───────────────────────────────────────────────────
@@ -732,7 +719,7 @@ public sealed partial class MenusPage : Page
     private void AddItemAt(int slot)
     {
         if (Live is null) return;
-        PutAt(slot, new MenuItemConfig { Label = "New item", Icon = "default", ActionType = ActionType.None });
+        PutAt(slot, new MenuItemConfig { Label = "New item", Icon = "fluent:dial", ActionType = ActionType.None });
         SelectSlot(slot);
         MarkDirty();
     }
@@ -778,17 +765,20 @@ public sealed partial class MenusPage : Page
     {
         _labelBox.Text = item.Label;
         _iconBox.Text  = item.Icon ?? "";
-        _iconCombo.SelectedIndex = -1;
 
-        _actionCombo.SelectedIndex = Array.IndexOf(EditableActionTypes, item.ActionType.ToString());
+        _paneActionType = item.ActionType;
+        _actionCombo.SelectedIndex = ActionCatalog.IndexOf(item.ActionType);
 
-        _appPath.Text   = item.AppPath    ?? "";
-        _appArgs.Text   = item.AppArgs    ?? "";
-        _urlBox.Text    = item.Url        ?? "";
-        _comboBox.Text  = item.KeyCombo   ?? "";
+        _appPath.Text    = item.AppPath    ?? "";
+        _appArgs.Text    = item.AppArgs    ?? "";
+        _urlBox.Text     = item.Url        ?? "";
+        _comboBox.Text   = item.KeyCombo   ?? "";
         ParseComboToCheckboxes(item.KeyCombo);
-        _scriptBox.Text = item.ScriptPath ?? "";
-        _clipBox.Text   = item.ClipText   ?? "";
+        _scriptBox.Text  = item.ScriptPath ?? "";
+        _clipBox.Text    = item.ClipText   ?? "";
+        _folderPath.Text = item.FolderPath ?? "";
+        _commandBox.Text = item.Command    ?? "";
+        _runAsAdmin.IsChecked = item.RunAsAdmin;
 
         var mNames = Enum.GetNames<MediaActionType>();
         _mediaCombo.SelectedIndex = item.MediaAction.HasValue
@@ -809,20 +799,33 @@ public sealed partial class MenusPage : Page
 
     private void OnActionTypeChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (_actionCombo.SelectedItem is string name && Enum.TryParse<ActionType>(name, out var at))
-            ShowPane(at);
+        if (SelectedAction is not ActionType at) return;
+
+        // If the icon is still the previous type's default (or empty), follow the new type.
+        string current  = _iconBox.Text.Trim();
+        string? prevDef = ActionCatalog.Find(_paneActionType)?.DefaultIcon;
+        string? newDef  = ActionCatalog.Find(at)?.DefaultIcon;
+        bool auto = current.Length == 0
+                 || string.Equals(current, prevDef, StringComparison.OrdinalIgnoreCase)
+                 || string.Equals(FluentGlyphs.Canonicalize(current), "fluent:dial", StringComparison.OrdinalIgnoreCase);
+        if (auto && newDef is not null && at != _paneActionType) _iconBox.Text = newDef;
+
+        _paneActionType = at;
+        ShowPane(at);
     }
 
     private void ShowPane(ActionType at)
     {
-        _appPane.Visibility    = at == ActionType.LaunchApp      ? Visibility.Visible : Visibility.Collapsed;
-        _urlPane.Visibility    = at == ActionType.OpenUrl        ? Visibility.Visible : Visibility.Collapsed;
-        _comboPane.Visibility  = at == ActionType.KeyCombo       ? Visibility.Visible : Visibility.Collapsed;
-        _mediaPane.Visibility  = at == ActionType.Media          ? Visibility.Visible : Visibility.Collapsed;
-        _subPane.Visibility    = at == ActionType.SubMenu        ? Visibility.Visible : Visibility.Collapsed;
-        _scriptPane.Visibility = at == ActionType.RunScript      ? Visibility.Visible : Visibility.Collapsed;
-        _clipPane.Visibility   = at == ActionType.PasteClipboard ? Visibility.Visible : Visibility.Collapsed;
-        _macroPane.Visibility  = at == ActionType.Macro          ? Visibility.Visible : Visibility.Collapsed;
+        _appPane.Visibility     = at == ActionType.LaunchApp      ? Visibility.Visible : Visibility.Collapsed;
+        _folderPane.Visibility  = at == ActionType.OpenFolder     ? Visibility.Visible : Visibility.Collapsed;
+        _commandPane.Visibility = at == ActionType.RunCommand     ? Visibility.Visible : Visibility.Collapsed;
+        _urlPane.Visibility     = at == ActionType.OpenUrl        ? Visibility.Visible : Visibility.Collapsed;
+        _comboPane.Visibility   = at == ActionType.KeyCombo       ? Visibility.Visible : Visibility.Collapsed;
+        _mediaPane.Visibility   = at == ActionType.Media          ? Visibility.Visible : Visibility.Collapsed;
+        _subPane.Visibility     = at == ActionType.SubMenu        ? Visibility.Visible : Visibility.Collapsed;
+        _scriptPane.Visibility  = at == ActionType.RunScript      ? Visibility.Visible : Visibility.Collapsed;
+        _clipPane.Visibility    = at == ActionType.PasteClipboard ? Visibility.Visible : Visibility.Collapsed;
+        _macroPane.Visibility   = at == ActionType.Macro          ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ── Macro step editor ─────────────────────────────────────────────────
@@ -915,17 +918,20 @@ public sealed partial class MenusPage : Page
     {
         if (Cur is null) return;
         Cur.Label = NE(_labelBox.Text) ?? "Item";
-        Cur.Icon  = NE(_iconBox.Text)  ?? "default";
+        Cur.Icon  = NE(_iconBox.Text)  ?? "fluent:dial";
 
-        if (_actionCombo.SelectedItem is string atName && Enum.TryParse<ActionType>(atName, out var at))
+        if (SelectedAction is ActionType at)
         {
             Cur.ActionType = at;
-            Cur.AppPath    = at == ActionType.LaunchApp      ? NE(_appPath.Text)   : null;
-            Cur.AppArgs    = at == ActionType.LaunchApp      ? NE(_appArgs.Text)   : null;
-            Cur.Url        = at == ActionType.OpenUrl        ? NE(_urlBox.Text)    : null;
-            Cur.KeyCombo   = at == ActionType.KeyCombo       ? NE(_comboBox.Text)  : null;
-            Cur.ScriptPath = at == ActionType.RunScript      ? NE(_scriptBox.Text) : null;
-            Cur.ClipText   = at == ActionType.PasteClipboard ? NE(_clipBox.Text)   : null;
+            Cur.AppPath    = at == ActionType.LaunchApp      ? NE(_appPath.Text)    : null;
+            Cur.AppArgs    = at == ActionType.LaunchApp      ? NE(_appArgs.Text)    : null;
+            Cur.FolderPath = at == ActionType.OpenFolder     ? NE(_folderPath.Text) : null;
+            Cur.Command    = at == ActionType.RunCommand     ? NE(_commandBox.Text) : null;
+            Cur.RunAsAdmin = at == ActionType.RunCommand     && _runAsAdmin.IsChecked == true;
+            Cur.Url        = at == ActionType.OpenUrl        ? NE(_urlBox.Text)     : null;
+            Cur.KeyCombo   = at == ActionType.KeyCombo       ? NE(_comboBox.Text)   : null;
+            Cur.ScriptPath = at == ActionType.RunScript      ? NE(_scriptBox.Text)  : null;
+            Cur.ClipText   = at == ActionType.PasteClipboard ? NE(_clipBox.Text)    : null;
 
             if (at == ActionType.Media && _mediaCombo.SelectedItem is string mn
                 && Enum.TryParse<MediaActionType>(mn, out var ma))
@@ -983,7 +989,7 @@ public sealed partial class MenusPage : Page
         float innerR  = minDim * 0.17f;
         float iconR   = (outerR + innerR) / 2f;
 
-        int sliceCount = Math.Clamp(appear.SliceCount, 4, 12);
+        int sliceCount = Math.Clamp(appear.SliceCount, 3, 12);
         int itemCount  = menu?.Items.Count ?? 0;
         float fullArc  = 360f / sliceCount;
         float gap      = appear.GapDegrees;
@@ -1194,41 +1200,52 @@ public sealed partial class MenusPage : Page
         catch (Exception ex) { Logger.Error("BrowseApp failed", ex); }
     }
 
+    private async void BrowseFolderAsync(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = await Pickers.PickFolderAsync();
+            if (path is not null) _folderPath.Text = path;
+        }
+        catch (Exception ex) { Logger.Error("BrowseFolder failed", ex); }
+    }
+
     // ── Presets ───────────────────────────────────────────────────────────
 
     private static readonly (string Name, Func<List<MenuItemConfig>> Factory)[] BuiltInPresets =
     [
         ("Media Controls", () =>
         [
-            new() { Label = "Play / Pause", Icon = "play",     ActionType = ActionType.Media, MediaAction = MediaActionType.PlayPause  },
-            new() { Label = "Next",          Icon = "next",     ActionType = ActionType.Media, MediaAction = MediaActionType.Next       },
-            new() { Label = "Previous",      Icon = "prev",     ActionType = ActionType.Media, MediaAction = MediaActionType.Previous   },
-            new() { Label = "Volume Up",     Icon = "vol_up",   ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeUp,
+            new() { Label = "Play / Pause", Icon = "fluent:play",        ActionType = ActionType.Media, MediaAction = MediaActionType.PlayPause  },
+            new() { Label = "Next",          Icon = "fluent:next",        ActionType = ActionType.Media, MediaAction = MediaActionType.Next       },
+            new() { Label = "Previous",      Icon = "fluent:previous",    ActionType = ActionType.Media, MediaAction = MediaActionType.Previous   },
+            new() { Label = "Volume Up",     Icon = "fluent:volume_up",   ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeUp,
                     ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
-            new() { Label = "Volume Down",   Icon = "vol_down", ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeDown,
+            new() { Label = "Volume Down",   Icon = "fluent:volume_down", ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeDown,
                     ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
-            new() { Label = "Mute",          Icon = "mute",     ActionType = ActionType.Media, MediaAction = MediaActionType.Mute       },
+            new() { Label = "Mute",          Icon = "fluent:mute",        ActionType = ActionType.Media, MediaAction = MediaActionType.Mute       },
         ]),
         ("System Tools", () =>
         [
-            new() { Label = "Settings",   Icon = "settings",   ActionType = ActionType.OpenSettings                                             },
-            new() { Label = "Desktop",    Icon = "desktop",    ActionType = ActionType.KeyCombo,  KeyCombo = "Win+D"                           },
-            new() { Label = "Lock",       Icon = "lock",       ActionType = ActionType.KeyCombo,  KeyCombo = "Win+L"                           },
-            new() { Label = "Screenshot", Icon = "screenshot", ActionType = ActionType.KeyCombo,  KeyCombo = "Win+Shift+S"                     },
-            new() { Label = "Task Mgr",   Icon = "list",       ActionType = ActionType.KeyCombo,  KeyCombo = "Ctrl+Shift+Esc"                  },
-            new() { Label = "Clipboard",  Icon = "clipboard",  ActionType = ActionType.SubMenu,   SubMenuId = AppConstants.ClipboardHistoryMenuId },
-            new() { Label = "Apps",       Icon = "apps",       ActionType = ActionType.SubMenu,   SubMenuId = AppConstants.ActiveTasksMenuId      },
+            new() { Label = "Settings",   Icon = "fluent:settings",  ActionType = ActionType.OpenSettings                                              },
+            new() { Label = "Desktop",    Icon = "fluent:desktop",   ActionType = ActionType.KeyCombo,   KeyCombo = "Win+D"                            },
+            new() { Label = "Lock",       Icon = "fluent:lock",      ActionType = ActionType.KeyCombo,   KeyCombo = "Win+L"                            },
+            new() { Label = "Screenshot", Icon = "fluent:camera",    ActionType = ActionType.KeyCombo,   KeyCombo = "Win+Shift+S"                      },
+            new() { Label = "Task Mgr",   Icon = "fluent:list",      ActionType = ActionType.RunCommand, Command = "taskmgr"                           },
+            new() { Label = "Registry",   Icon = "fluent:terminal",  ActionType = ActionType.RunCommand, Command = "regedit", RunAsAdmin = true        },
+            new() { Label = "Downloads",  Icon = "fluent:folder",    ActionType = ActionType.OpenFolder, FolderPath = "%USERPROFILE%\\Downloads"       },
+            new() { Label = "Apps",       Icon = "fluent:apps",      ActionType = ActionType.SubMenu,    SubMenuId = AppConstants.ActiveTasksMenuId    },
         ]),
         ("Productivity", () =>
         [
-            new() { Label = "Copy",       Icon = "copy",     ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+C" },
-            new() { Label = "Paste",      Icon = "paste",    ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+V" },
-            new() { Label = "Cut",        Icon = "edit",     ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+X" },
-            new() { Label = "Undo",       Icon = "back",     ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+Z" },
-            new() { Label = "Redo",       Icon = "forward",  ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+Y" },
-            new() { Label = "Save",       Icon = "download", ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+S" },
-            new() { Label = "Find",       Icon = "search",   ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+F" },
-            new() { Label = "Select All", Icon = "check",    ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+A" },
+            new() { Label = "Copy",       Icon = "fluent:copy",   ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+C" },
+            new() { Label = "Paste",      Icon = "fluent:paste",  ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+V" },
+            new() { Label = "Cut",        Icon = "fluent:cut",    ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+X" },
+            new() { Label = "Undo",       Icon = "fluent:undo",   ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+Z" },
+            new() { Label = "Redo",       Icon = "fluent:redo",   ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+Y" },
+            new() { Label = "Save",       Icon = "fluent:save",   ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+S" },
+            new() { Label = "Find",       Icon = "fluent:search", ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+F" },
+            new() { Label = "Select All", Icon = "fluent:check",  ActionType = ActionType.KeyCombo, KeyCombo = "Ctrl+A" },
         ]),
     ];
 

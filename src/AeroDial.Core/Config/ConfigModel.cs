@@ -24,14 +24,14 @@ public sealed class AeroDialConfig
         Name  = "Main Menu",
         Items =
         [
-            new() { Label = "Media",       Icon = "media",    ActionType = ActionType.SubMenu, SubMenuId = "media"                                                 },
-            new() { Label = "Active Apps", Icon = "apps",     ActionType = ActionType.SubMenu, SubMenuId = AeroDial.Core.AppConstants.ActiveTasksMenuId           },
-            new() { Label = "Volume Up",   Icon = "vol_up",   ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeUp,   ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
-            new() { Label = "Volume Down", Icon = "vol_down", ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeDown, ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
-            new() { Label = "Mute",        Icon = "mute",     ActionType = ActionType.Media,     MediaAction = MediaActionType.Mute            },
-            new() { Label = "Play/Pause",  Icon = "play",     ActionType = ActionType.Media,     MediaAction = MediaActionType.PlayPause       },
-            new() { Label = "Settings",    Icon = "settings", ActionType = ActionType.OpenSettings                                            },
-            new() { Label = "Desktop",     Icon = "desktop",  ActionType = ActionType.KeyCombo,  KeyCombo    = "Win+D"                         },
+            new() { Label = "Media",       Icon = "fluent:audio",       ActionType = ActionType.SubMenu, SubMenuId = "media"                                       },
+            new() { Label = "Active Apps", Icon = "fluent:apps",        ActionType = ActionType.SubMenu, SubMenuId = AeroDial.Core.AppConstants.ActiveTasksMenuId },
+            new() { Label = "Volume Up",   Icon = "fluent:volume_up",   ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeUp,   ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
+            new() { Label = "Volume Down", Icon = "fluent:volume_down", ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeDown, ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
+            new() { Label = "Mute",        Icon = "fluent:mute",        ActionType = ActionType.Media,     MediaAction = MediaActionType.Mute      },
+            new() { Label = "Play/Pause",  Icon = "fluent:play",        ActionType = ActionType.Media,     MediaAction = MediaActionType.PlayPause },
+            new() { Label = "Settings",    Icon = "fluent:settings",    ActionType = ActionType.OpenSettings                                       },
+            new() { Label = "Desktop",     Icon = "fluent:desktop",     ActionType = ActionType.KeyCombo,  KeyCombo    = "Win+D"                   },
         ]
     };
 
@@ -41,12 +41,12 @@ public sealed class AeroDialConfig
         Name  = "Media",
         Items =
         [
-            new() { Label = "Play/Pause", Icon = "play",     ActionType = ActionType.Media, MediaAction = MediaActionType.PlayPause  },
-            new() { Label = "Next",       Icon = "next",     ActionType = ActionType.Media, MediaAction = MediaActionType.Next       },
-            new() { Label = "Previous",   Icon = "prev",     ActionType = ActionType.Media, MediaAction = MediaActionType.Previous   },
-            new() { Label = "Volume Up",  Icon = "vol_up",   ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeUp,   ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
-            new() { Label = "Vol Down",   Icon = "vol_down", ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeDown, ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
-            new() { Label = "Mute",       Icon = "mute",     ActionType = ActionType.Media, MediaAction = MediaActionType.Mute       },
+            new() { Label = "Play/Pause", Icon = "fluent:play",        ActionType = ActionType.Media, MediaAction = MediaActionType.PlayPause  },
+            new() { Label = "Next",       Icon = "fluent:next",        ActionType = ActionType.Media, MediaAction = MediaActionType.Next       },
+            new() { Label = "Previous",   Icon = "fluent:previous",    ActionType = ActionType.Media, MediaAction = MediaActionType.Previous   },
+            new() { Label = "Volume Up",  Icon = "fluent:volume_up",   ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeUp,   ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
+            new() { Label = "Vol Down",   Icon = "fluent:volume_down", ActionType = ActionType.Media, MediaAction = MediaActionType.VolumeDown, ScrollUpAction = MediaActionType.VolumeUp, ScrollDownAction = MediaActionType.VolumeDown },
+            new() { Label = "Mute",       Icon = "fluent:mute",        ActionType = ActionType.Media, MediaAction = MediaActionType.Mute       },
         ]
     };
 }
@@ -124,7 +124,7 @@ public sealed class RadialMenuConfig
 public sealed class MenuItemConfig
 {
     public string     Label       { get; set; } = "Item";
-    public string     Icon        { get; set; } = "default";
+    public string     Icon        { get; set; } = "fluent:dial";
     public ActionType ActionType  { get; set; } = ActionType.None;
 
     public string?          AppPath     { get; set; }
@@ -135,6 +135,13 @@ public sealed class MenuItemConfig
     public string?          ClipText    { get; set; }
     public string?          SubMenuId       { get; set; }
     public MediaActionType? MediaAction     { get; set; }
+
+    // OpenFolder — folder (or file, which is selected in Explorer) to open
+    public string?          FolderPath  { get; set; }
+
+    // RunCommand — Win+R style command line, optionally elevated
+    public string?          Command     { get; set; }
+    public bool             RunAsAdmin  { get; set; }
 
     // Macro — an ordered sequence of keystroke/text/delay steps (ActionType.Macro)
     public List<MacroStep>? Macro           { get; set; }
@@ -190,6 +197,8 @@ public enum ActionType
     OpenSettings,
     FocusWindow,  // bring an existing window to the foreground (HWND is in-memory only)
     Macro,        // run an ordered sequence of keystroke/text/delay steps
+    OpenFolder,   // open a folder in File Explorer (FolderPath)
+    RunCommand,   // Win+R semantics: expand env vars, shell-execute (Command, RunAsAdmin)
 }
 
 public enum MacroStepType

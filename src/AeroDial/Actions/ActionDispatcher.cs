@@ -26,9 +26,11 @@ internal sealed class ActionDispatcher
 
             switch (item.ActionType)
             {
-                case ActionType.LaunchApp:      RunOffThread(item, LaunchApp); break;
-                case ActionType.OpenUrl:        RunOffThread(item, OpenUrl);   break;
-                case ActionType.RunScript:      RunOffThread(item, RunScript); break;
+                case ActionType.LaunchApp:      RunOffThread(item, LaunchApp);  break;
+                case ActionType.OpenUrl:        RunOffThread(item, OpenUrl);    break;
+                case ActionType.RunScript:      RunOffThread(item, RunScript);  break;
+                case ActionType.OpenFolder:     RunOffThread(item, OpenFolder); break;
+                case ActionType.RunCommand:     RunOffThread(item, RunCommand); break;
                 case ActionType.KeyCombo:       SendKeyCombo(item);  break;
                 case ActionType.Media:          SendMedia(item);     break;
                 case ActionType.PasteClipboard: PasteClip(item);    break;
@@ -74,6 +76,61 @@ internal sealed class ActionDispatcher
             UseShellExecute = true,
         };
         Process.Start(psi);
+    }
+
+    private static void OpenFolder(MenuItemConfig item)
+    {
+        var path = Environment.ExpandEnvironmentVariables(item.FolderPath?.Trim() ?? "");
+        if (path.Length == 0) return;
+
+        string args;
+        if (Directory.Exists(path))       args = $"\"{path}\"";
+        else if (File.Exists(path))       args = $"/select,\"{path}\""; // open the parent and highlight the file
+        else
+        {
+            App.Tray.ShowBalloon("Folder not found", path);
+            return;
+        }
+        Process.Start(new ProcessStartInfo("explorer.exe", args) { UseShellExecute = true });
+    }
+
+    /// <summary>Win+R semantics: environment variables expanded, first token is the program
+    /// (or a URI / shell: path / ms-settings: page), the rest are its arguments.</summary>
+    private static void RunCommand(MenuItemConfig item)
+    {
+        var line = Environment.ExpandEnvironmentVariables(item.Command?.Trim() ?? "");
+        if (line.Length == 0) return;
+
+        var (file, args) = SplitCommandLine(line);
+        var psi = new ProcessStartInfo
+        {
+            FileName         = file,
+            Arguments        = args,
+            UseShellExecute  = true,
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
+        if (item.RunAsAdmin) psi.Verb = "runas";
+
+        try { Process.Start(psi); }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // ERROR_CANCELLED: the user dismissed the UAC prompt — not an error worth a balloon.
+        }
+    }
+
+    /// <summary>Splits a Run-box style line into (program, arguments). A leading quoted
+    /// segment is the program; otherwise the first whitespace-delimited token is.</summary>
+    internal static (string File, string Args) SplitCommandLine(string line)
+    {
+        line = line.Trim();
+        if (line.StartsWith('"'))
+        {
+            int end = line.IndexOf('"', 1);
+            if (end > 0)
+                return (line[1..end], line[(end + 1)..].Trim());
+        }
+        int sp = line.IndexOfAny([' ', '\t']);
+        return sp < 0 ? (line, string.Empty) : (line[..sp], line[(sp + 1)..].Trim());
     }
 
     private static void OpenUrl(MenuItemConfig item)

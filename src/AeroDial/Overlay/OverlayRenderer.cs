@@ -648,7 +648,7 @@ internal sealed class OverlayRenderer : IDisposable
             _pollCount++;
 
             var   appearance  = App.Config.Current.Appearance;
-            int   sliceCount  = appearance.SliceCount;
+            int   sliceCount  = Math.Clamp(appearance.SliceCount, 3, 12);
             bool  isFlick     = App.Config.Current.Behavior.SelectionMode == SelectionMode.Flick;
             bool  partial     = appearance.PartialArcSubMenu;
             bool  thinning    = appearance.DynamicRingThinning;
@@ -1008,7 +1008,7 @@ internal sealed class OverlayRenderer : IDisposable
                         float ix   = cx + MathF.Cos(rad) * iconR;
                         float iy   = cy + MathF.Sin(rad) * iconR;
 
-                        DrawIcon(sc, ix, iy, item, theme, hov, rAlpha, scale);
+                        DrawIcon(sc, ix, iy, item, theme, hov, rAlpha, scale, IconSizeMul(sliceCount));
                         if (item.ScrollUpAction.HasValue || item.ScrollDownAction.HasValue)
                             DrawScrollIndicator(sc, cx, cy, iconR, mid, theme, hov, rAlpha, scale);
                     }
@@ -1433,7 +1433,7 @@ internal sealed class OverlayRenderer : IDisposable
             DrawIcon(canvas,
                 cx + MathF.Cos(rad) * iconR,
                 cy + MathF.Sin(rad) * iconR,
-                item, theme, hov, alpha, scale);
+                item, theme, hov, alpha, scale, IconSizeMul(count));
         }
     }
 
@@ -1482,7 +1482,7 @@ internal sealed class OverlayRenderer : IDisposable
             DrawIcon(canvas,
                 cx + MathF.Cos(rad) * iconR,
                 cy + MathF.Sin(rad) * iconR,
-                item, theme, hov, alpha, scale * 0.88f);
+                item, theme, hov, alpha, scale * 0.88f, IconSizeMul(count));
         }
     }
 
@@ -1564,12 +1564,16 @@ internal sealed class OverlayRenderer : IDisposable
         }
     }
 
+    /// <summary>Icons shrink a little on crowded rings (more than 8 slices) so they stay
+    /// inside their slice; never below ~64% of the normal size.</summary>
+    private static float IconSizeMul(int count) => Math.Clamp(8f / Math.Max(count, 1), 0.64f, 1f);
+
     private void DrawIcon(SKCanvas canvas, float x, float y,
-        MenuItemConfig item, AeroTheme theme, bool hov, float alpha, float scale)
+        MenuItemConfig item, AeroTheme theme, bool hov, float alpha, float scale, float sizeMul = 1f)
     {
         var bmp = IconRegistry.Get(item.Icon, theme.IconStrokeScale);
         if (bmp is null) return;
-        float size = (hov ? 27f : 22f) * scale;
+        float size = (hov ? 27f : 22f) * scale * sizeMul;
         var dest = new SKRect(x-size/2, y-size/2, x+size/2, y+size/2);
         // Built-in icons are drawn white, so Modulate with the theme tint recolors them.
         // Full-color exe/image icons must NOT be tinted (a dark tint in a light theme would

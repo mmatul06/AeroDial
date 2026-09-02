@@ -53,6 +53,7 @@ internal sealed class ConfigService
                     Logger.Info($"Config migrated from v{fromVersion} to v{ConfigMigrator.CurrentVersion}.");
 
                 config = root.Deserialize<AeroDialConfig>(s_jsonOptions) ?? new AeroDialConfig();
+                Sanitize(config);
                 Logger.Info($"Config loaded from {AppConstants.ConfigPath}");
             }
             catch (Exception ex)
@@ -76,6 +77,14 @@ internal sealed class ConfigService
         var service = new ConfigService(config);
         await service.SaveAsync(); // always flush so file stays in sync with model
         return service;
+    }
+
+    /// <summary>Clamps values a hand-edited file could put out of range.</summary>
+    private static void Sanitize(AeroDialConfig config)
+    {
+        config.Appearance.SliceCount = Math.Clamp(config.Appearance.SliceCount, 3, 12);
+        config.Appearance.Scale      = Math.Clamp(config.Appearance.Scale, 0.4f, 2.0f);
+        if (config.Menus.Count == 0) config.Menus = new AeroDialConfig().Menus;
     }
 
     // ── Persistence ───────────────────────────────────────────────────────

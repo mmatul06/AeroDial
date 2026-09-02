@@ -5,15 +5,17 @@
 //
 // Version history:
 //   1  v1.0 - v2.0 (no configVersion field)
-//   2  v3.0: configVersion field introduced; no structural changes yet
+//   2  v3.0: configVersion field introduced
+//   3  v3.0: built-in icon names ("play", "vol_up", ...) rewritten to "fluent:<name>"
 
 using System.Text.Json.Nodes;
+using AeroDial.Core;
 
 namespace AeroDial.Config;
 
 internal static class ConfigMigrator
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     private const string VersionField = "configVersion";
 
@@ -30,6 +32,7 @@ internal static class ConfigMigrator
             switch (v)
             {
                 case 1: MigrateV1ToV2(root); break;
+                case 2: MigrateV2ToV3(root); break;
             }
         }
 
@@ -45,7 +48,25 @@ internal static class ConfigMigrator
         return 1;
     }
 
-    // v1 -> v2: only stamps the version. Kept as an explicit step so later
-    // migrations have a template to follow.
+    // v1 -> v2: only stamps the version.
     private static void MigrateV1ToV2(JsonObject root) { }
+
+    // v2 -> v3: legacy hand-drawn icon names become system-font glyph keys.
+    private static void MigrateV2ToV3(JsonObject root)
+    {
+        if (root["menus"] is not JsonArray menus) return;
+        foreach (var menu in menus)
+        {
+            if (menu?["items"] is not JsonArray items) continue;
+            foreach (var item in items)
+            {
+                if (item is not JsonObject obj) continue;
+                if (obj["icon"] is JsonValue v && v.TryGetValue<string>(out var icon) && icon is not null)
+                {
+                    var canonical = FluentGlyphs.Canonicalize(icon);
+                    if (!ReferenceEquals(canonical, icon)) obj["icon"] = canonical;
+                }
+            }
+        }
+    }
 }
