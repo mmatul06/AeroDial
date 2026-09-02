@@ -8,6 +8,7 @@ Fixes for the four issues reported right after 3.0.0.
 - **Icon-font glyphs were clipped** (the left edge of every icon was missing on the ring and in the menu editor). The glyph was being centered twice. The self-test now checks that rendered glyphs are whole and centered.
 - **"Slices per ring" slider** sat in the middle of the page and moved when the window was resized. It now lines up with the other sliders.
 - **Themes page** reworked: a divider and real spacing between the list and the editor, Apply / Duplicate / Delete buttons that fit the column, compact hex fields grouped by what they affect, the three numeric properties stacked as spin boxes, and the live preview, name, font and save buttons in a column that stays visible while you scroll the colors.
+- **Settings window was too small on scaled displays.** Its size was set in physical pixels, so at 125 % display scaling every page had 20 % less room than designed. The window now opens at its intended size on any scaling.
 
 ---
 
