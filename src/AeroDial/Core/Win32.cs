@@ -186,6 +186,40 @@ internal static partial class Win32
     [LibraryImport("user32.dll")]
     public static partial uint GetWindowThreadProcessId(nint hWnd, out uint lpdwProcessId);
 
+    [LibraryImport("user32.dll")]
+    public static partial uint GetDpiForWindow(nint hWnd);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    public static partial nint OpenProcess(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwProcessId);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool QueryFullProcessImageName(nint hProcess, uint dwFlags, Span<char> lpExeName, ref uint lpdwSize);
+
+    [LibraryImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool CloseHandle(nint hObject);
+
+    public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    /// <summary>Process name (exe file name without extension) for a pid, or null. A single
+    /// kernel call with no System.Diagnostics.Process involvement, so it is safe to call from
+    /// the hook thread; works for elevated processes too (limited query access).</summary>
+    public static string? GetProcessNameByPid(uint pid)
+    {
+        if (pid == 0) return null;
+        nint h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (h == 0) return null;
+        try
+        {
+            Span<char> buf = stackalloc char[1024];
+            uint len = (uint)buf.Length;
+            if (!QueryFullProcessImageName(h, 0, buf, ref len) || len == 0) return null;
+            return Path.GetFileNameWithoutExtension(new string(buf[..(int)len]));
+        }
+        finally { CloseHandle(h); }
+    }
+
     [DllImport("user32.dll")]
     public static extern nint CallWindowProcW(nint lpPrevWndFunc, nint hWnd, uint Msg, nint wParam, nint lParam);
 

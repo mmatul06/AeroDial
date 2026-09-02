@@ -50,8 +50,9 @@ internal sealed class OverlayController : IDisposable
 
     // Trigger gate cache: per foreground window, whether an app profile disables the dial.
     private bool _hasDisabledProfiles;
-    private nint _gateHwnd;
-    private bool _gateAllowed = true;
+    // One reference so the hook thread never reads a window handle paired with a stale answer.
+    private sealed record GateEntry(nint Hwnd, bool Allowed);
+    private GateEntry? _gate;
 
     public OverlayController()
     {
@@ -69,21 +70,22 @@ internal sealed class OverlayController : IDisposable
         _needsActiveTasks = App.Config.Current.Menus.Any(m =>
             m.Items.Any(i => i.SubMenuId == AppConstants.ActiveTasksMenuId));
         _hasDisabledProfiles = App.Config.Current.AppProfiles.Any(p => p.MenuId == ProfileMatcher.DisabledMenuId);
-        _gateHwnd = 0; // invalidate the cache
+        _gate = null; // invalidate the cache
     }
 
     /// <summary>Called on the hook thread before a trigger press is swallowed. Returns false
     /// when an app profile disables the dial for the foreground app, so the button or key
-    /// passes through to that app instead. Cached per foreground window: the lookup costs a
-    /// process-name query, which must not run on every click.</summary>
+    /// passes through to that app instead. Cached per foreground window; the miss path is a
+    /// single kernel query (Win32.GetProcessNameByPid), cheap enough for the hook thread.</summary>
     private bool TriggerAllowedForForeground()
     {
         if (!_hasDisabledProfiles) return true;
         var hwnd = Win32.GetForegroundWindow();
-        if (hwnd == _gateHwnd) return _gateAllowed;
-        _gateAllowed = !ProfileMatcher.IsDisabledFor(App.Config.Current, GetForegroundProcessName());
-        _gateHwnd    = hwnd;
-        return _gateAllowed;
+        var g = _gate;
+        if (g is not null && g.Hwnd == hwnd) return g.Allowed;
+        bool allowed = !ProfileMatcher.IsDisabledFor(App.Config.Current, GetForegroundProcessName());
+        _gate = new GateEntry(hwnd, allowed);
+        return allowed;
     }
 
     // ── Trigger ───────────────────────────────────────────────────────────
@@ -697,14 +699,10 @@ internal sealed class OverlayController : IDisposable
 
     private static string? GetForegroundProcessName()
     {
-        try
-        {
-            var hwnd = Win32.GetForegroundWindow();
-            Win32.GetWindowThreadProcessId(hwnd, out uint pid);
-            using var proc = Process.GetProcessById((int)pid);
-            return proc.ProcessName;
-        }
-        catch { return null; }
+        var hwnd = Win32.GetForegroundWindow();
+        if (hwnd == 0) return null;
+        Win32.GetWindowThreadProcessId(hwnd, out uint pid);
+        return Win32.GetProcessNameByPid(pid);
     }
 
     // ── IDisposable ───────────────────────────────────────────────────────

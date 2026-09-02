@@ -201,7 +201,8 @@ internal static class IconRegistry
             Color       = SKColors.White,
             Typeface    = _glyphTypeface,
             TextSize    = size * 0.70f, // glyphs sit inside the em box with margins already
-            TextAlign   = SKTextAlign.Center,
+            // TextAlign stays Left: DrawText applies Center itself (shifting by half the advance),
+            // which on top of the ink-bounds centering below pushed every glyph off the left edge.
             Style       = SKPaintStyle.StrokeAndFill,
             StrokeWidth = weight,
             StrokeJoin  = SKStrokeJoin.Round,

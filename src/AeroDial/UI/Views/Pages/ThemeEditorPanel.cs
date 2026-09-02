@@ -1,6 +1,10 @@
 // AeroDial — ThemeEditorPanel.cs
 // Live theme editor hosted inside ThemesPage. Edits a copy of the loaded theme;
 // Save writes a user theme (built-in themes are saved as a new copy) and raises Saved.
+//
+// Layout: the color and numeric fields scroll in the left column; the ring preview,
+// identity, label font and the save buttons sit in a right column that stays put, so
+// every edit is visible while scrolling through the colors.
 
 using AeroDial.Themes;
 using Microsoft.UI;
@@ -21,93 +25,98 @@ public sealed partial class ThemeEditorPanel : UserControl
     private TextBlock  _saved   = null!, _sourceNote = null!;
     private Button     _saveBtn = null!, _saveApplyBtn = null!;
     private ComboBox   _fontFamilyCombo = null!;
-    private readonly Dictionary<string, TextBox> _colorBoxes    = [];
-    private readonly Dictionary<string, Button>  _colorSwatches = [];
-    private readonly Dictionary<string, TextBox> _floatBoxes    = [];
+    private readonly Dictionary<string, TextBox>   _colorBoxes    = [];
+    private readonly Dictionary<string, Button>    _colorSwatches = [];
+    private readonly Dictionary<string, NumberBox> _floatBoxes    = [];
     private SKXamlCanvas? _previewCanvas;
     private bool _loading;
     private bool _sourceIsBuiltIn;
 
-    // Color fields in display order: (property name, display label)
-    private static readonly (string Prop, string Label)[] ColorFields =
+    // Sized so the fields column fits beside the pinned preview column at the default
+    // window width (settings window 1120 logical px, nav rail 274, theme list 241, side 232).
+    private const double LabelColumnWidth = 140;
+    private const double SwatchColumnWidth = 28;
+    private const double HexBoxWidth = 104;
+    private const double SideColumnWidth = 232;
+    // A number box spans the swatch column, its gap and the hex box so the right edges line up.
+    private const double NumberBoxWidth = SwatchColumnWidth + 10 + HexBoxWidth;
+
+    // Color fields in display order: (property name, display label, group caption)
+    private static readonly (string Prop, string Label, string Group)[] ColorFields =
     [
-        ("AccentColor",             "Accent"),
-        ("SliceFill",               "Slice fill"),
-        ("SliceFillHover",          "Slice fill (hover)"),
-        ("SliceGradientInner",      "Gradient inner"),
-        ("SliceGradientOuter",      "Gradient outer"),
-        ("SliceGradientInnerHover", "Gradient inner (hover)"),
-        ("SliceGradientOuterHover", "Gradient outer (hover)"),
-        ("GlowColor",               "Glow"),
-        ("SliceStroke",             "Slice border"),
-        ("SliceStrokeHover",        "Slice border (hover)"),
-        ("RingBorderColor",         "Ring border (L2/L3)"),
-        ("CenterFill",              "Center fill"),
-        ("CenterStroke",            "Center border"),
-        ("IconTint",                "Icon tint"),
-        ("IconTintHover",           "Icon tint (hover)"),
-        ("LabelColor",              "Label"),
-        ("LabelColorHover",         "Label (hover)"),
-        ("DimColor",                "Background dim"),
+        ("AccentColor",             "Accent",                 "Slices"),
+        ("SliceFill",               "Slice fill",             "Slices"),
+        ("SliceFillHover",          "Slice fill (hover)",     "Slices"),
+        ("SliceGradientInner",      "Gradient inner",         "Slices"),
+        ("SliceGradientOuter",      "Gradient outer",         "Slices"),
+        ("SliceGradientInnerHover", "Gradient inner (hover)", "Slices"),
+        ("SliceGradientOuterHover", "Gradient outer (hover)", "Slices"),
+        ("GlowColor",               "Glow",                   "Slices"),
+        ("SliceStroke",             "Slice border",           "Slices"),
+        ("SliceStrokeHover",        "Slice border (hover)",   "Slices"),
+        ("RingBorderColor",         "Ring border (L2/L3)",    "Center and rings"),
+        ("CenterFill",              "Center fill",            "Center and rings"),
+        ("CenterStroke",            "Center border",          "Center and rings"),
+        ("IconTint",                "Icon tint",              "Icons and labels"),
+        ("IconTintHover",           "Icon tint (hover)",      "Icons and labels"),
+        ("LabelColor",              "Label",                  "Icons and labels"),
+        ("LabelColorHover",         "Label (hover)",          "Icons and labels"),
+        ("DimColor",                "Background dim",         "Screen"),
+    ];
+
+    // Numeric fields: (property name, display label, spin step)
+    private static readonly (string Prop, string Label, double Step)[] FloatFields =
+    [
+        ("SliceStrokeWidth",    "Border width",      0.5),
+        ("LabelFontSize",       "Label font size",   1),
+        ("VolumeRingThickness", "Volume ring width", 1),
     ];
 
     public ThemeEditorPanel() => Build();
 
     private void Build()
     {
-        // Single scrolling column (this panel sits beside the theme list, so width is limited).
-        var scroll = new ScrollViewer { Padding = new Thickness(8, 24, 24, 32) };
+        var root = new Grid();
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SideColumnWidth) });
+
+        // ── Left: scrolling fields ────────────────────────────────────────
+        var scroll = new ScrollViewer { Padding = new Thickness(20, 24, 12, 32) };
         var stack  = new StackPanel { Spacing = 6 };
 
-        // Header row: title + live preview side by side
-        var headRow = new Grid { ColumnSpacing = 16 };
-        headRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        headRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var headText = new StackPanel { Spacing = 4 };
-        headText.Children.Add(PageKit.PageHeader("Edit theme"));
+        stack.Children.Add(PageKit.PageHeader("Edit theme"));
         _sourceNote = Ui.Hint("");
-        headText.Children.Add(_sourceNote);
-
-        // ── Name / description ────────────────────────────────────────────
-        headText.Children.Add(PageKit.SubHeader("Identity"));
-        _nameBox = new TextBox { PlaceholderText = "My theme", Header = "Name" };
-        _descBox = new TextBox { PlaceholderText = "A short description", Header = "Description" };
-        headText.Children.Add(_nameBox);
-        headText.Children.Add(_descBox);
-        Grid.SetColumn(headText, 0);
-        headRow.Children.Add(headText);
-
-        _previewCanvas = new SKXamlCanvas
-        {
-            Width = 180, Height = 180,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 8, 0, 0),
-        };
-        _previewCanvas.PaintSurface += OnPreviewPaint;
-        Grid.SetColumn(_previewCanvas, 1);
-        headRow.Children.Add(_previewCanvas);
-        stack.Children.Add(headRow);
+        stack.Children.Add(_sourceNote);
 
         // ── Color fields ──────────────────────────────────────────────────
         stack.Children.Add(PageKit.SubHeader("Colors"));
         stack.Children.Add(Ui.Hint("Click a swatch to pick, or type #AARRGGBB. Gradient fields may be empty to use the flat slice fill.", 11));
 
         var colorGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6, Margin = new Thickness(0, 4, 0, 0) };
-        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
-        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
-        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelColumnWidth) });
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SwatchColumnWidth) });
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        for (int i = 0; i < ColorFields.Length; i++)
+        int row = 0;
+        string? group = null;
+        foreach (var (prop, label, grp) in ColorFields)
         {
-            var (prop, label) = ColorFields[i];
-            int col = 0;
-            int row = i;
-            if (colorGrid.RowDefinitions.Count <= row)
+            if (grp != group)
+            {
+                // Small caption when the group changes so 18 rows read as four short lists.
+                group = grp;
                 colorGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                var cap = Ui.Hint(grp, 11);
+                cap.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+                cap.Margin = new Thickness(0, row == 0 ? 2 : 10, 0, 0);
+                Grid.SetRow(cap, row); Grid.SetColumnSpan(cap, 3); colorGrid.Children.Add(cap);
+                row++;
+            }
+
+            colorGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var lbl = new TextBlock { Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(lbl, col); Grid.SetRow(lbl, row); colorGrid.Children.Add(lbl);
+            Grid.SetColumn(lbl, 0); Grid.SetRow(lbl, row); colorGrid.Children.Add(lbl);
 
             var picker = new ColorPicker
             {
@@ -119,7 +128,7 @@ public sealed partial class ThemeEditorPanel : UserControl
             var flyout = new Flyout
             {
                 Content                     = picker,
-                Placement                   = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.TopEdgeAlignedLeft,
+                Placement                   = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.RightEdgeAlignedTop,
                 ShouldConstrainToRootBounds = false,
             };
             var swatchBtn = new Button
@@ -130,11 +139,16 @@ public sealed partial class ThemeEditorPanel : UserControl
                 Flyout = flyout, VerticalAlignment = VerticalAlignment.Center,
             };
             _colorSwatches[prop] = swatchBtn;
-            Grid.SetColumn(swatchBtn, col + 1); Grid.SetRow(swatchBtn, row); colorGrid.Children.Add(swatchBtn);
+            Grid.SetColumn(swatchBtn, 1); Grid.SetRow(swatchBtn, row); colorGrid.Children.Add(swatchBtn);
 
-            var box = new TextBox { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            var box = new TextBox
+            {
+                FontSize = 12, Width = HexBoxWidth,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontFamily = new FontFamily("Consolas"),
+            };
             _colorBoxes[prop] = box;
-            Grid.SetColumn(box, col + 2); Grid.SetRow(box, row); colorGrid.Children.Add(box);
+            Grid.SetColumn(box, 2); Grid.SetRow(box, row); colorGrid.Children.Add(box);
 
             // Two-way sync TextBox <-> ColorPicker; `syncing` breaks the feedback loop.
             bool syncing = false;
@@ -156,35 +170,65 @@ public sealed partial class ThemeEditorPanel : UserControl
                 swatchBtn.Background = new SolidColorBrush(ColorHelper.FromArgb(c.A, c.R, c.G, c.B));
                 _previewCanvas?.Invalidate();
             };
+            row++;
         }
         stack.Children.Add(colorGrid);
 
-        // ── Float properties ──────────────────────────────────────────────
+        // ── Numeric properties: one per row, spin boxes aligned with the hex fields ──
         stack.Children.Add(PageKit.SubHeader("Other properties"));
-        var floatGrid = new Grid { ColumnSpacing = 12, RowSpacing = 6 };
-        for (int i = 0; i < 3; i++) floatGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        floatGrid.RowDefinitions.Add(new RowDefinition());
-        (string Prop, string Label)[] floatFields =
-        [
-            ("SliceStrokeWidth",    "Border width"),
-            ("LabelFontSize",       "Label font size"),
-            ("VolumeRingThickness", "Volume ring width"),
-        ];
-        for (int i = 0; i < floatFields.Length; i++)
+        var floatGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6 };
+        floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelColumnWidth) });
+        floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        for (int i = 0; i < FloatFields.Length; i++)
         {
-            var (prop, lbl) = floatFields[i];
-            var colStack = new StackPanel { Spacing = 4 };
-            colStack.Children.Add(new TextBlock { Text = lbl, FontSize = 12 });
-            var tb = new TextBox { FontSize = 12 };
-            _floatBoxes[prop] = tb;
-            colStack.Children.Add(tb);
-            Grid.SetColumn(colStack, i); floatGrid.Children.Add(colStack);
+            var (prop, label, step) = FloatFields[i];
+            floatGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var lbl = new TextBlock { Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(lbl, 0); Grid.SetRow(lbl, i); floatGrid.Children.Add(lbl);
+
+            var nb = new NumberBox
+            {
+                Width = NumberBoxWidth, FontSize = 12,
+                Minimum = 0, SmallChange = step, LargeChange = step * 4,
+                SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            nb.ValueChanged += (_, _) => _previewCanvas?.Invalidate();
+            _floatBoxes[prop] = nb;
+            Grid.SetColumn(nb, 1); Grid.SetRow(nb, i); floatGrid.Children.Add(nb);
         }
         stack.Children.Add(floatGrid);
 
-        // ── Font family ───────────────────────────────────────────────────
-        stack.Children.Add(PageKit.SubHeader("Label font"));
-        _fontFamilyCombo = new ComboBox { Width = 260 };
+        scroll.Content = stack;
+        Grid.SetColumn(scroll, 0);
+        root.Children.Add(scroll);
+
+        // ── Right: pinned preview, identity, font, save ───────────────────
+        var side = new Grid { Padding = new Thickness(8, 24, 20, 24) };
+        side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        side.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        _previewCanvas = new SKXamlCanvas
+        {
+            Width = 200, Height = 200,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 12, 0, 4),
+        };
+        _previewCanvas.PaintSurface += OnPreviewPaint;
+        Grid.SetRow(_previewCanvas, 0);
+        side.Children.Add(_previewCanvas);
+
+        var sideFields = new StackPanel { Spacing = 6 };
+        sideFields.Children.Add(PageKit.SubHeader("Identity"));
+        _nameBox = new TextBox { PlaceholderText = "My theme", Header = "Name" };
+        _descBox = new TextBox { PlaceholderText = "A short description", Header = "Description" };
+        sideFields.Children.Add(_nameBox);
+        sideFields.Children.Add(_descBox);
+
+        sideFields.Children.Add(PageKit.SubHeader("Label font"));
+        _fontFamilyCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var f in new[]
         {
             "Segoe UI Variable", "Segoe UI", "Segoe UI Light",
@@ -193,13 +237,22 @@ public sealed partial class ThemeEditorPanel : UserControl
         })
             _fontFamilyCombo.Items.Add(f);
         _fontFamilyCombo.SelectionChanged += (_, _) => _previewCanvas?.Invalidate();
-        stack.Children.Add(_fontFamilyCombo);
+        sideFields.Children.Add(_fontFamilyCombo);
+
+        var sideScroll = new ScrollViewer { Content = sideFields, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(sideScroll, 1);
+        side.Children.Add(sideScroll);
 
         // ── Save ──────────────────────────────────────────────────────────
-        _saveBtn = new Button { Content = "Save", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+        _saveBtn = new Button
+        {
+            Content = "Save",
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
         _saveBtn.Click += async (_, _) => { var n = SaveTheme(); if (n is not null) await ShowSavedBadge(); };
 
-        _saveApplyBtn = new Button { Content = "Save and apply" };
+        _saveApplyBtn = new Button { Content = "Save and apply", HorizontalAlignment = HorizontalAlignment.Stretch };
         _saveApplyBtn.Click += async (_, _) =>
         {
             var name = SaveTheme();
@@ -209,17 +262,20 @@ public sealed partial class ThemeEditorPanel : UserControl
         };
 
         _saved = PageKit.SavedBadge();
-        var saveRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(0, 14, 0, 0) };
-        saveRow.Children.Add(_saveBtn);
-        saveRow.Children.Add(_saveApplyBtn);
-        saveRow.Children.Add(_saved);
-        stack.Children.Add(saveRow);
+        _saved.HorizontalAlignment = HorizontalAlignment.Center;
+        var saveCol = new StackPanel { Spacing = 8, Margin = new Thickness(0, 16, 0, 0) };
+        saveCol.Children.Add(_saveBtn);
+        saveCol.Children.Add(_saveApplyBtn);
+        saveCol.Children.Add(_saved);
+        Grid.SetRow(saveCol, 2);
+        side.Children.Add(saveCol);
+
+        Grid.SetColumn(side, 1);
+        root.Children.Add(side);
 
         _nameBox.TextChanged += (_, _) => _previewCanvas?.Invalidate();
-        foreach (var fb in _floatBoxes.Values) fb.TextChanged += (_, _) => _previewCanvas?.Invalidate();
 
-        scroll.Content = stack;
-        Content = scroll;
+        Content = root;
     }
 
     // ── Load / save ───────────────────────────────────────────────────────
@@ -236,21 +292,30 @@ public sealed partial class ThemeEditorPanel : UserControl
             : $"Editing {t.Name}.";
         _saveBtn.Content = t.IsBuiltIn ? "Save as new theme" : "Save";
 
-        foreach (var (prop, _) in ColorFields)
+        foreach (var (prop, _, _) in ColorFields)
         {
             if (!_colorBoxes.TryGetValue(prop, out var box)) continue;
             string val = GetColorProp(t, prop);
             box.Text = val;
             if (_colorSwatches.TryGetValue(prop, out var btn)) btn.Background = HexToBrush(val);
         }
-        if (_floatBoxes.TryGetValue("SliceStrokeWidth",    out var fb1)) fb1.Text = t.SliceStrokeWidth.ToString("0.##");
-        if (_floatBoxes.TryGetValue("LabelFontSize",       out var fb2)) fb2.Text = t.LabelFontSize.ToString("0.##");
-        if (_floatBoxes.TryGetValue("VolumeRingThickness", out var fb3)) fb3.Text = t.VolumeRingThickness.ToString("0.##");
+        SetFloat("SliceStrokeWidth",    t.SliceStrokeWidth);
+        SetFloat("LabelFontSize",       t.LabelFontSize);
+        SetFloat("VolumeRingThickness", t.VolumeRingThickness);
         _fontFamilyCombo.SelectedItem = t.LabelFontFamily;
         if (_fontFamilyCombo.SelectedItem is null) _fontFamilyCombo.SelectedIndex = 0;
         _loading = false;
         _previewCanvas?.Invalidate();
     }
+
+    private void SetFloat(string prop, float value)
+    {
+        if (_floatBoxes.TryGetValue(prop, out var nb)) nb.Value = value;
+    }
+
+    /// <summary>Value of a numeric field, or null when it is empty (NumberBox reports NaN).</summary>
+    private float? GetFloat(string prop)
+        => _floatBoxes.TryGetValue(prop, out var nb) && !double.IsNaN(nb.Value) ? (float)nb.Value : null;
 
     /// <summary>Builds and saves the theme from current field values. Returns the saved name, or null.</summary>
     private string? SaveTheme()
@@ -276,12 +341,12 @@ public sealed partial class ThemeEditorPanel : UserControl
 
         var t = new AeroTheme { Name = name, Description = _descBox.Text.Trim() };
 
-        foreach (var (prop, _) in ColorFields)
+        foreach (var (prop, _, _) in ColorFields)
             if (_colorBoxes.TryGetValue(prop, out var box)) SetColorProp(t, prop, box.Text.Trim());
 
-        if (_floatBoxes.TryGetValue("SliceStrokeWidth", out var fb1) && float.TryParse(fb1.Text, out float strokeW)) t.SliceStrokeWidth = strokeW;
-        if (_floatBoxes.TryGetValue("LabelFontSize", out var fb2) && float.TryParse(fb2.Text, out float fontSize)) t.LabelFontSize = fontSize;
-        if (_floatBoxes.TryGetValue("VolumeRingThickness", out var fb3) && float.TryParse(fb3.Text, out float volW) && volW > 0f) t.VolumeRingThickness = volW;
+        if (GetFloat("SliceStrokeWidth")    is { } strokeW)         t.SliceStrokeWidth     = strokeW;
+        if (GetFloat("LabelFontSize")       is { } fontSize)        t.LabelFontSize        = fontSize;
+        if (GetFloat("VolumeRingThickness") is { } volW && volW > 0f) t.VolumeRingThickness = volW;
         if (_fontFamilyCombo?.SelectedItem is string fontFamily) t.LabelFontFamily = fontFamily;
         return t;
     }

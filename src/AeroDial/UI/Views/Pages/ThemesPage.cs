@@ -19,12 +19,19 @@ public sealed partial class ThemesPage : Page
 
     private void Build()
     {
+        // List | hairline divider | editor. The divider column gives the two halves a clear
+        // boundary and the paddings on either side keep the cards away from the editor.
         var outer = new Grid();
-        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
+        var divider = new Border { Background = Ui.Divider, Width = 1, Margin = new Thickness(0, 24, 0, 24) };
+        Grid.SetColumn(divider, 1);
+        outer.Children.Add(divider);
+
         // ── Left: theme list ──────────────────────────────────────────────
-        var leftScroll = new ScrollViewer { Padding = new Thickness(28, 24, 8, 24) };
+        var leftScroll = new ScrollViewer { Padding = new Thickness(28, 24, 16, 24) };
         var left = new StackPanel { Spacing = 6 };
         left.Children.Add(PageKit.PageHeader("Themes"));
 
@@ -52,7 +59,7 @@ public sealed partial class ThemesPage : Page
             _selected = name;
             RebuildList();
         };
-        Grid.SetColumn(_editor, 1);
+        Grid.SetColumn(_editor, 2);
         outer.Children.Add(_editor);
 
         Content = outer;
@@ -126,8 +133,9 @@ public sealed partial class ThemesPage : Page
             _list.Children.Add(card);
         }
 
-        // Actions for the selected theme
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
+        // Actions for the selected theme: Apply on its own full-width line, then
+        // Duplicate | Delete side by side. Three buttons in one row overflow this column.
+        var actions = new StackPanel { Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
         var selTheme = _selected is null ? null : App.Themes.Get(_selected);
 
         var applyBtn = new Button
@@ -135,6 +143,7 @@ public sealed partial class ThemesPage : Page
             Content = "Apply",
             Style = (Style)Application.Current.Resources["AccentButtonStyle"],
             IsEnabled = selTheme is not null && _selected != active,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         applyBtn.Click += async (_, _) =>
         {
@@ -144,7 +153,15 @@ public sealed partial class ThemesPage : Page
         };
         actions.Children.Add(applyBtn);
 
-        var dupBtn = new Button { Content = "Duplicate", IsEnabled = selTheme is not null };
+        var pair = new Grid { ColumnSpacing = 6 };
+        pair.ColumnDefinitions.Add(new ColumnDefinition());
+        pair.ColumnDefinitions.Add(new ColumnDefinition());
+
+        var dupBtn = new Button
+        {
+            Content = "Duplicate", IsEnabled = selTheme is not null,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
         dupBtn.Click += (_, _) =>
         {
             if (selTheme is null) return;
@@ -153,9 +170,10 @@ public sealed partial class ThemesPage : Page
             RebuildList();
             LoadSelected();
         };
-        actions.Children.Add(dupBtn);
+        Grid.SetColumn(dupBtn, 0); pair.Children.Add(dupBtn);
 
         var delBtn = PageKit.DangerButton("Delete");
+        delBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
         delBtn.IsEnabled = selTheme is not null && !selTheme.IsBuiltIn;
         delBtn.Click += async (_, _) =>
         {
@@ -176,7 +194,8 @@ public sealed partial class ThemesPage : Page
             RebuildList();
             LoadSelected();
         };
-        actions.Children.Add(delBtn);
+        Grid.SetColumn(delBtn, 1); pair.Children.Add(delBtn);
+        actions.Children.Add(pair);
         _list.Children.Add(actions);
     }
 

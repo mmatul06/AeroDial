@@ -1657,9 +1657,7 @@ internal sealed class OverlayRenderer : IDisposable
         }
     }
 
-    /// <summary>Icons shrink a little on crowded rings (more than 8 slices) so they stay
-    /// inside their slice; never below ~64% of the normal size.</summary>
-    private static float IconSizeMul(int count) => Math.Clamp(8f / Math.Max(count, 1), 0.64f, 1f);
+    // Icon size per slice count comes from RingGeometry.IconSizeMul (shared with the editor preview).
 
     private void DrawIcon(SKCanvas canvas, float x, float y,
         MenuItemConfig item, AeroTheme theme, bool hov, float alpha, float scale, float sizeMul = 1f)

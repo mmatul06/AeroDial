@@ -19,7 +19,7 @@ AeroDial opens a customisable radial menu wherever your cursor is, triggered by 
 
 ## Download
 
-**[⬇ Download AeroDial v3.0.0](https://github.com/mmatul06/AeroDial/releases/latest)**
+**[⬇ Download AeroDial v3.0.1](https://github.com/mmatul06/AeroDial/releases/latest)**
 
 Download and run `AeroDial.exe` (a single self-contained executable). No installer required.
 
@@ -133,7 +133,7 @@ Bind a specific menu to a specific app. When that app is in the foreground and y
 
 ## Installation
 
-1. Download `AeroDial.exe` (v3.0.0) from [Releases](../../releases)
+1. Download `AeroDial.exe` (v3.0.1) from [Releases](../../releases)
 2. Run it — it's a **single self-contained executable**: no installer, no extraction, no separate .NET runtime
 3. AeroDial starts silently in the system tray
 4. Right-click the tray icon and choose **Settings** to configure your trigger and menus

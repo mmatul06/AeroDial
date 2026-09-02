@@ -12,7 +12,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <Version>3.0.0</Version>
+    <Version>3.0.1</Version>
     <Company>3M Design Solutions</Company>
     <Authors>Muhtasim Mahbub</Authors>
     <Copyright>Copyright © 2026 Muhtasim Mahbub | 3M Design Solutions</Copyright>

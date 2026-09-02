@@ -52,6 +52,13 @@ internal static class PageKit
     public static Button DangerButton(string content)
         => new() { Content = content, Foreground = Ui.Critical };
 
+    /// <summary>A slider that fills its column. Never give it a fixed Width: a fixed-width
+    /// control with Stretch alignment is centered in its slot and drifts when the window resizes.</summary>
     public static Slider MakeSlider(string header, double min, double max, double step, double val)
-        => new() { Header = header, Minimum = min, Maximum = max, StepFrequency = step, Value = val, Width = 340 };
+        => new()
+        {
+            Header = header, Minimum = min, Maximum = max, StepFrequency = step, Value = val,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 0, 0, 8),
+        };
 }

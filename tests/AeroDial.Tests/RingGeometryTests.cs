@@ -5,6 +5,15 @@ namespace AeroDial.Tests;
 public class RingGeometryTests
 {
     [Theory]
+    [InlineData(3, 1f)]
+    [InlineData(8, 1f)]          // no shrink up to 8 slices
+    [InlineData(10, 0.8f)]
+    [InlineData(12, 0.6667f)]
+    [InlineData(20, 0.64f)]      // floor
+    public void IconSizeMul_shrinks_only_above_eight_slices(int count, float expected)
+        => Assert.Equal(expected, RingGeometry.IconSizeMul(count), 3);
+
+    [Theory]
     [InlineData(0, -10, 0)]      // straight up
     [InlineData(10, 0, 2)]       // right (8 slices: 0 top, 2 right, 4 bottom, 6 left)
     [InlineData(0, 10, 4)]

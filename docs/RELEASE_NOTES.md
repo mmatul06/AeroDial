@@ -1,3 +1,16 @@
+## AeroDial v3.0.1
+
+Fixes for the four issues reported right after 3.0.0.
+
+### Fixed
+
+- **Tap-through froze the mouse for about a second.** The replayed click was sent from inside the low-level mouse hook, so Windows held all mouse input until its hook timeout expired. The replay now runs on a worker thread and the hook returns immediately. The trigger gate for "Disabled" app profiles no longer touches `System.Diagnostics.Process` on the hook thread either, and the hook callbacks no longer allocate per mouse move. With debug logging on, any hook callback slower than 20 ms is reported in the log.
+- **Icon-font glyphs were clipped** (the left edge of every icon was missing on the ring and in the menu editor). The glyph was being centered twice. The self-test now checks that rendered glyphs are whole and centered.
+- **"Slices per ring" slider** sat in the middle of the page and moved when the window was resized. It now lines up with the other sliders.
+- **Themes page** reworked: a divider and real spacing between the list and the editor, Apply / Duplicate / Delete buttons that fit the column, compact hex fields grouped by what they affect, the three numeric properties stacked as spin boxes, and the live preview, name, font and save buttons in a column that stays visible while you scroll the colors.
+
+---
+
 ## AeroDial v3.0.0
 
 The biggest AeroDial release yet: a rebuilt input and rendering core, a Windows 11 native settings window, a system icon font with hundreds of icons, two new action types, and a long list of quality-of-life fixes reported by users.

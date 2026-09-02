@@ -29,7 +29,7 @@ public sealed class SettingsWindow : Window
     private static Win32.WndProcDelegate? _wndProcDelegate;
     private static nint _prevWndProc;
 
-    private const int WindowWidth  = 1080;
+    private const int WindowWidth  = 1120;  // logical px (see ConfigureChrome)
     private const int WindowHeight = 760;
 
     private readonly NavigationView _nav;
@@ -280,7 +280,13 @@ public sealed class SettingsWindow : Window
 
     private void ConfigureChrome(UIElement dragRegion)
     {
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(WindowWidth, WindowHeight));
+        // AppWindow sizes are physical pixels; WindowWidth/Height are the logical layout size,
+        // so scale by the monitor DPI (at 125 % a 1120 px layout needs a 1400 px window).
+        // Without this the window shrinks to 80 % of its layout at 125 % and pages get cramped.
+        float dpiScale = Math.Max(1f, Win32.GetDpiForWindow(WindowHandle) / 96f);
+        int   physW    = (int)Math.Round(WindowWidth  * dpiScale);
+        int   physH    = (int)Math.Round(WindowHeight * dpiScale);
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(physW, physH));
         AppWindow.IsShownInSwitchers = true;
 
         var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "aerodial.ico");
@@ -296,8 +302,8 @@ public sealed class SettingsWindow : Window
         }
 
         var display = DisplayArea.Primary;
-        int x = (display.WorkArea.Width  - WindowWidth)  / 2;
-        int y = (display.WorkArea.Height - WindowHeight) / 2;
+        int x = (display.WorkArea.Width  - physW) / 2;
+        int y = (display.WorkArea.Height - physH) / 2;
         AppWindow.Move(new Windows.Graphics.PointInt32(Math.Max(0, x), Math.Max(0, y)));
     }
 }

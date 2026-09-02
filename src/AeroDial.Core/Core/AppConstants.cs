@@ -8,7 +8,7 @@ internal static class AppConstants
 {
     // ── Identity ──────────────────────────────────────────────────────────
     public const string AppName            = "AeroDial";
-    public const string Version            = "3.0.0";
+    public const string Version            = "3.0.1";
     public const string Author             = "Muhtasim Mahbub";
     public const string Company            = "3M Design Solutions";
     public const string Website            = "https://3mdesignsolutions.com";

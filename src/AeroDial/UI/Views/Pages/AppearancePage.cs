@@ -31,6 +31,15 @@ public sealed partial class AppearancePage : Page
 
     public AppearancePage() => Build();
 
+    private static Grid TwoColumnGrid()
+    {
+        var g = new Grid { Margin = new Thickness(0, 4, 0, 4), ColumnSpacing = 16, RowSpacing = 4 };
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.RowDefinitions.Add(new RowDefinition());
+        return g;
+    }
+
     private void Build()
     {
         // Two-column layout: controls scroll on the left; ring preview stays pinned on the right.
@@ -50,7 +59,11 @@ public sealed partial class AppearancePage : Page
         _slices.TickFrequency = 1;
         _slices.TickPlacement = Microsoft.UI.Xaml.Controls.Primitives.TickPlacement.BottomRight;
         _slices.SnapsTo       = Microsoft.UI.Xaml.Controls.Primitives.SliderSnapsTo.StepValues;
-        stack.Children.Add(_slices);
+        // Same two-column grid as the ring sliders below, so this track shares their left edge
+        // and length instead of floating in the middle of the page.
+        var sliceGrid = TwoColumnGrid();
+        Grid.SetColumn(_slices, 0); sliceGrid.Children.Add(_slices);
+        stack.Children.Add(sliceGrid);
 
         // Sliders — compact 2-column grid
         stack.Children.Add(PageKit.SubHeader("Ring properties"));
@@ -58,15 +71,7 @@ public sealed partial class AppearancePage : Page
         _gap     = PageKit.MakeSlider("Slice gap (°)",   0,   8,   0.5,  cfg.GapDegrees);
         _opacity = PageKit.MakeSlider("Ring opacity",    0.3, 1.0, 0.05, cfg.RingOpacity);
         _detach  = PageKit.MakeSlider("Center gap (px)", 0,   40,  1,    cfg.RingInnerDetach);
-        foreach (var sl in new[] { _scale, _gap, _opacity, _detach })
-        {
-            sl.Width  = double.NaN;
-            sl.Margin = new Thickness(0, 0, 0, 8);
-            sl.HorizontalAlignment = HorizontalAlignment.Stretch;
-        }
-        var sliderGrid = new Grid { Margin = new Thickness(0, 4, 0, 4), ColumnSpacing = 16, RowSpacing = 4 };
-        sliderGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        sliderGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        var sliderGrid = TwoColumnGrid();
         sliderGrid.RowDefinitions.Add(new RowDefinition());
         sliderGrid.RowDefinitions.Add(new RowDefinition());
         Grid.SetRow(_scale,   0); Grid.SetColumn(_scale,   0); sliderGrid.Children.Add(_scale);

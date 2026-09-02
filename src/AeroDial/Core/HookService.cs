@@ -10,6 +10,8 @@
 //   - keyboard navigation keys while the overlay is open (swallowed, forwarded as events)
 //   - Paused: everything passes through untouched
 
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using AeroDial.Config;
 using AeroDial.Core;
@@ -50,7 +52,6 @@ internal sealed class HookService : IDisposable
     // before that (and without moving), it was a click meant for the app: replay it.
     private int    _pendingTap;             // 1 while a press is being held back (Interlocked)
     private Win32.POINT _pendingPt;
-    private uint   _pendingMouseData;
     private Timer? _tapTimer;
     private const int TapMoveTolerancePx = 6;
 
@@ -266,12 +267,23 @@ internal sealed class HookService : IDisposable
 
     // ── Mouse hook callback ───────────────────────────────────────────────
 
+    // Everything in the hook callbacks runs on the hook thread while the whole system's input
+    // waits on it: no allocation, no blocking, no SendInput, nothing slower than a few
+    // microseconds. Anything heavier is posted to the thread pool.
     private nint MouseHookCallback(int nCode, nint wParam, nint lParam)
+    {
+        long t0 = _timing ? Stopwatch.GetTimestamp() : 0;
+        var result = MouseHookCore(nCode, wParam, lParam);
+        if (_timing) ReportCallbackTime("mouse", t0);
+        return result;
+    }
+
+    private unsafe nint MouseHookCore(int nCode, nint wParam, nint lParam)
     {
         if (nCode >= 0 && !Paused)
         {
             var trigCfg  = App.Config.Current.Trigger;
-            var info     = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+            ref readonly var info = ref Unsafe.AsRef<MSLLHOOKSTRUCT>((void*)lParam);
             int msg      = (int)wParam;
             bool isMouse = trigCfg.VirtualKey is >= 0x01 and <= 0x06;
 
@@ -297,7 +309,6 @@ internal sealed class HookService : IDisposable
                         // Hold the press back; the timer (or a movement) turns it into a trigger,
                         // a quick release turns it into a replayed click.
                         _pendingPt        = info.pt;
-                        _pendingMouseData = info.mouseData;
                         Interlocked.Exchange(ref _pendingTap, 1);
                         StartTapTimer(Math.Clamp(bCfg.TapThresholdMs, 30, 1000));
                     }
@@ -313,8 +324,13 @@ internal sealed class HookService : IDisposable
                 if (isUp && Interlocked.Exchange(ref _pendingTap, 0) == 1)
                 {
                     // Released before the threshold: it was a click. Give it back to the app.
+                    // The replay must NOT run inside this callback: the injected events have to
+                    // travel through this very hook, which cannot service them until we return,
+                    // and Windows stalls all mouse input until its hook timeout (about 300 ms per
+                    // event). Sending from the thread pool lets the callback return immediately.
                     CancelTapTimer();
-                    ReplayClick(trigCfg.VirtualKey, _pendingMouseData);
+                    int vk = trigCfg.VirtualKey;
+                    ThreadPool.UnsafeQueueUserWorkItem(static v => ReplayClick(v), vk, preferLocal: false);
                     return new nint(1);
                 }
 
@@ -368,12 +384,9 @@ internal sealed class HookService : IDisposable
         _tapTimer = new Timer(_ => PromotePendingTap(), null, ms, Timeout.Infinite);
     }
 
-    private void CancelTapTimer()
-    {
-        var t = _tapTimer;
-        _tapTimer = null;
-        t?.Dispose();
-    }
+    // Called from the hook thread and from the timer's own thread-pool callback; the
+    // exchange makes sure only one of them disposes the timer.
+    private void CancelTapTimer() => Interlocked.Exchange(ref _tapTimer, null)?.Dispose();
 
     /// <summary>The held-back press is a real trigger: open the dial at the press position.</summary>
     private void PromotePendingTap()
@@ -385,8 +398,9 @@ internal sealed class HookService : IDisposable
         Task.Run(() => TriggerActivated?.Invoke(pt));
     }
 
-    /// <summary>Injects a down+up for the trigger button, tagged so this hook ignores it.</summary>
-    private static void ReplayClick(int vk, uint mouseData)
+    /// <summary>Injects a down+up for the trigger button, tagged so this hook ignores it.
+    /// Runs on a thread-pool thread, never on the hook thread (see MouseHookCore).</summary>
+    private static void ReplayClick(int vk)
     {
         (uint down, uint up, uint data) = vk switch
         {
@@ -412,10 +426,18 @@ internal sealed class HookService : IDisposable
 
     private nint KeyboardHookCallback(int nCode, nint wParam, nint lParam)
     {
+        long t0 = _timing ? Stopwatch.GetTimestamp() : 0;
+        var result = KeyboardHookCore(nCode, wParam, lParam);
+        if (_timing) ReportCallbackTime("keyboard", t0);
+        return result;
+    }
+
+    private unsafe nint KeyboardHookCore(int nCode, nint wParam, nint lParam)
+    {
         if (nCode >= 0 && !Paused)
         {
             var cfg  = App.Config.Current.Trigger;
-            var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+            ref readonly var info = ref Unsafe.AsRef<KBDLLHOOKSTRUCT>((void*)lParam);
             int msg  = (int)wParam;
             int vk   = (int)info.vkCode;
             bool isDown = msg is WM_KEYDOWN or WM_SYSKEYDOWN;
@@ -450,6 +472,19 @@ internal sealed class HookService : IDisposable
             }
         }
         return CallNextHookEx(_keyHook, nCode, wParam, lParam);
+    }
+
+    // ── Callback timing (debug logging only) ──────────────────────────────
+
+    // Windows silently drops a low-level hook whose callback exceeds LowLevelHooksTimeout,
+    // and the cursor freezes for as long as a callback runs. With debug logging on, any
+    // callback slower than 20 ms is reported so a regression is visible in the log.
+    private static bool _timing => App.Config.Current.Behavior.EnableDebugLogging;
+
+    private static void ReportCallbackTime(string which, long t0)
+    {
+        double ms = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+        if (ms > 20) Task.Run(() => Logger.Warn($"Hook callback slow: {which} hook took {ms:F1} ms"));
     }
 
     /// <summary>Arrows, Enter, Escape, Backspace, digits 1-9 (top row and numpad).</summary>

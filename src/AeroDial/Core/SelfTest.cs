@@ -28,6 +28,7 @@ internal static class SelfTest
         try
         {
             Logger.Info("SELFTEST: begin");
+            if (!CheckGlyphBounds()) Environment.ExitCode = 2;
             OverlayRenderer.TestInputEnabled = true;
 
             int cx = GetSystemMetrics(0) / 2, cy = GetSystemMetrics(1) / 2;
@@ -119,6 +120,45 @@ internal static class SelfTest
             Logger.FlushNow();
             App.Tray.DispatcherQueue.TryEnqueue(App.RequestShutdown);
         }
+    }
+
+    /// <summary>Rasterizes a handful of icon-font glyphs and checks that the ink is whole and
+    /// centered: nothing within 2 px of the bitmap edge, ink center within 3 px of the bitmap
+    /// center. Guards against the v3.0.0 regression where every glyph lost its left edge.</summary>
+    private static bool CheckGlyphBounds()
+    {
+        bool ok = true;
+        var keys = FluentGlyphs.Named.Take(12).Select(g => FluentGlyphs.Prefix + g.Name)
+            .Append(FluentGlyphs.Prefix + "E8B7").ToArray();
+        foreach (var key in keys)
+        {
+            var bmp = IconRegistry.Get(key, 1f);
+            if (bmp is null) { Logger.Error($"SELFTEST: glyph {key} did not render"); ok = false; continue; }
+
+            int w = bmp.Width, h = bmp.Height;
+            int minX = w, minY = h, maxX = -1, maxY = -1;
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    if (bmp.GetPixel(x, y).Alpha < 16) continue;
+                    if (x < minX) minX = x; if (x > maxX) maxX = x;
+                    if (y < minY) minY = y; if (y > maxY) maxY = y;
+                }
+            if (maxX < 0) { Logger.Error($"SELFTEST: glyph {key} is empty"); ok = false; continue; }
+
+            bool  edge = minX < 2 || minY < 2 || maxX > w - 3 || maxY > h - 3;
+            float offX = (minX + maxX) / 2f - (w - 1) / 2f;
+            float offY = (minY + maxY) / 2f - (h - 1) / 2f;
+            if (edge || Math.Abs(offX) > 3f || Math.Abs(offY) > 3f)
+            {
+                Logger.Error($"SELFTEST: glyph {key} clipped or off-center: ink x {minX}..{maxX}, y {minY}..{maxY} in {w}x{h}, offset ({offX:F1},{offY:F1})");
+                ok = false;
+            }
+            else
+                Logger.Debug($"SELFTEST: glyph {key} ok: ink x {minX}..{maxX}, y {minY}..{maxY}");
+        }
+        Logger.Info(ok ? "SELFTEST: glyph bounds ok" : "SELFTEST: glyph bounds FAILED");
+        return ok;
     }
 
     private static void Cursor(int x, int y)

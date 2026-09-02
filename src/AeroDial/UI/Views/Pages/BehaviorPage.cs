@@ -76,6 +76,7 @@ public sealed partial class BehaviorPage : Page
 
             _dwellRow = new StackPanel { Spacing = 4, Margin = new Thickness(0, 4, 0, 0) };
             _dwell    = PageKit.MakeSlider("Hover dwell delay (ms)", 100, 1500, 50, cfg.HoverDwellMs);
+            _dwell.MaxWidth = 420; _dwell.HorizontalAlignment = HorizontalAlignment.Left;
             _dwellRow.Children.Add(_dwell);
             stack.Children.Add(_dwellRow);
             _dwellRow.Visibility = cfg.SelectionMode == AeroDial.Config.SelectionMode.HoverDwell
@@ -106,6 +107,7 @@ public sealed partial class BehaviorPage : Page
 
             _dwellRow = new StackPanel { Spacing = 4, Margin = new Thickness(0, 4, 0, 0) };
             _dwell = PageKit.MakeSlider("Hover dwell delay (ms)", 100, 1500, 50, cfg.HoverDwellMs);
+            _dwell.MaxWidth = 420; _dwell.HorizontalAlignment = HorizontalAlignment.Left;
             _dwellRow.Children.Add(_dwell);
             stack.Children.Add(_dwellRow);
             _dwellRow.Visibility = cfg.SelectionMode == AeroDial.Config.SelectionMode.HoverDwell

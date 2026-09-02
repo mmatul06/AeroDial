@@ -68,6 +68,11 @@ public static class RingGeometry
         return Math.Clamp(idx, 0, count - 1);
     }
 
+    /// <summary>Icon size multiplier for a ring with <paramref name="count"/> slices: 1 up to
+    /// 8 slices, then shrinking so icons stay inside their slice, never below 64 %.
+    /// Shared by the overlay and the settings ring preview so they match.</summary>
+    public static float IconSizeMul(int count) => Math.Clamp(8f / Math.Max(count, 1), 0.64f, 1f);
+
     /// <summary>Splits a center label into at most two lines at a word boundary near the middle.</summary>
     public static (string line1, string? line2) SplitCenterLabel(string label, int maxLine = 11)
     {
