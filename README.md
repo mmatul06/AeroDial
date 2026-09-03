@@ -21,7 +21,7 @@ AeroDial opens a customisable radial menu wherever your cursor is, triggered by 
 
 **[⬇ Download AeroDial v3.0.1](https://github.com/mmatul06/AeroDial/releases/latest)**
 
-Download and run `AeroDial.exe` (a single self-contained executable). No installer required.
+Download `AeroDial-3.0.1-Setup.exe` and run it. The installer is per user, so it needs no admin rights, and AeroDial appears in Apps & features like any other program.
 
 AeroDial starts silently in the system tray. Double Click on System Tray icon to open the Settings window.
 
@@ -133,14 +133,19 @@ Bind a specific menu to a specific app. When that app is in the foreground and y
 
 ## Installation
 
-1. Download `AeroDial.exe` (v3.0.1) from [Releases](../../releases)
-2. Run it — it's a **single self-contained executable**: no installer, no extraction, no separate .NET runtime
-3. AeroDial starts silently in the system tray
-4. Right-click the tray icon and choose **Settings** to configure your trigger and menus
+1. Download `AeroDial-3.0.1-Setup.exe` from [Releases](../../releases)
+2. Run it and follow the wizard. Installing takes a few seconds and needs **no admin rights**: AeroDial installs for your user only, under `%LocalAppData%\Programs\AeroDial`
+3. Leave **Start AeroDial automatically when I sign in** ticked if you want it always available
+4. AeroDial starts silently in the system tray
+5. Right-click the tray icon and choose **Settings** to configure your trigger and menus
 
-No admin rights or registry writes are needed (other than the optional "start with Windows" toggle).
+Upgrading is the same download: the installer replaces the previous version in place and keeps your menus, profiles and themes. Close AeroDial from the tray first, otherwise Setup will ask you to.
 
-To uninstall: quit from the tray, delete `AeroDial.exe`, optionally delete `%AppData%\Roaming\AeroDial` where config and user themes are stored.
+The .NET runtime, the WinUI 3 native libraries and the 11 built-in themes are all inside the app, so there is nothing else to install.
+
+To uninstall: **Settings > Apps > Installed apps > AeroDial > Uninstall**, or the Start menu shortcut. Your menus and themes in `%AppData%\AeroDial` are kept unless you answer Yes when the uninstaller offers to remove them.
+
+> Prefer a portable copy? The installed `AeroDial.exe` is fully self-contained: copy it anywhere and run it directly.
 
 ---
 
@@ -206,13 +211,23 @@ Output: `src/AeroDial/bin/x64/Debug/net9.0-windows10.0.26100.0/win-x64/`
 
 ## Publishing a release build
 
+```powershell
+.\installer\build-installer.ps1
+```
+
+That publishes the app and compiles the installer, producing `dist/AeroDial-<version>-Setup.exe` (~102 MB). It needs [Inno Setup 6](https://jrsoftware.org/isdl.php). Pass `-NoPublish` to compile the installer from an existing publish output. Upload the setup exe to Releases.
+
+The app alone is built with:
+
 ```bash
 dotnet publish src/AeroDial/AeroDial.csproj -c Release -r win-x64
 ```
 
 Output: `src/AeroDial/bin/Release/net9.0-windows10.0.26100.0/win-x64/publish/AeroDial.exe`
 
-This is a **single self-contained executable** (~110 MB, compressed). The .NET runtime, the WinUI 3 native DLLs, and SkiaSharp are all bundled and self-extracted at runtime; the 11 built-in themes are compiled into the app, so no side files are needed. Upload the `.exe` directly to Releases.
+This is a **single self-contained executable** (~110 MB, compressed). The .NET runtime, the WinUI 3 native DLLs, and SkiaSharp are all bundled and self-extracted at runtime; the 11 built-in themes are compiled into the app, so no side files are needed.
+
+The installer script `installer/AeroDial.iss` reads its version straight from the published exe, so the release version only ever lives in the csproj. It installs per user (the "start with Windows" setting writes to `HKCU\...\Run`, which a per-machine install would break for other users), refuses to run on anything below Windows 10 2004 or non-x64, detects a running AeroDial through its single-instance mutex, and on uninstall clears its own autostart entry and offers to remove `%AppData%\AeroDial`.
 
 The single-file settings live in the csproj Release `PropertyGroup` (`PublishSingleFile`, `IncludeNativeLibrariesForSelfExtract`, `EnableCompressionInSingleFile`) plus `EnableMsixTooling=true`, so the plain `dotnet publish -c Release -r win-x64` above produces the single exe with no extra flags.
 

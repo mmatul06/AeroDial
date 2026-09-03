@@ -2,6 +2,7 @@
 // Theme data model. Every visual property of the overlay is here.
 // Themes are stored as JSON files in the /themes folder.
 
+using System.Text.Json.Serialization;
 using SkiaSharp;
 
 namespace AeroDial.Themes;
@@ -49,8 +50,20 @@ public sealed class AeroTheme
     /// <summary>
     /// Multiplier applied to built-in icon stroke widths. 1.0 = original, 1.5 = 50% thicker.
     /// Has no effect on raster icons (.exe, .png, etc.) — those are always drawn at full size.
+    /// Clamp with <see cref="StrokeScale"/> before use.
     /// </summary>
     public float  IconStrokeScale  { get; set; } = 1.0f;
+    /// <summary>
+    /// Multiplier applied to the drawn icon size on the ring. 1.0 = default (22 px at scale 1).
+    /// Applies to every icon kind, including exe and image icons. Clamp with <see cref="SizeScale"/>.
+    /// </summary>
+    public float  IconSizeScale    { get; set; } = 1.0f;
+
+    /// <summary>Icon stroke multiplier clamped to the range the glyph rasterizer accepts.</summary>
+    [JsonIgnore] public float StrokeScale => Math.Clamp(IconStrokeScale, 0.2f, 3f);
+
+    /// <summary>Icon size multiplier clamped so icons stay inside their slice.</summary>
+    [JsonIgnore] public float SizeScale => Math.Clamp(IconSizeScale, 0.5f, 2f);
     public string LabelColor       { get; set; } = "#AAFFFFFF";
     public string LabelColorHover  { get; set; } = "#FFFFFFFF";
     public float  LabelFontSize    { get; set; } = 11f;

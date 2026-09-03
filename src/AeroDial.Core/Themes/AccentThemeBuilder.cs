@@ -40,7 +40,7 @@ public static class AccentThemeBuilder
             CenterStroke    = Hex(Mix(0.70f, 0x28)),
             IconTint        = "#BBFFFFFF",
             IconTintHover   = "#FFFFFFFF",
-            IconStrokeScale = 1.0f,
+            IconStrokeScale = 2.25f,   // same icon weight as the other built-in themes
             LabelColor      = "#99FFFFFF",
             LabelColorHover = "#FFFFFFFF",
             LabelFontSize   = 11f,

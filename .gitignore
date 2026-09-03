@@ -68,3 +68,5 @@ captured_defaults.json
 *.bak
 *.swp
 *~
+# Installer output
+dist/

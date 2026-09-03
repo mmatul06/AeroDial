@@ -1662,9 +1662,9 @@ internal sealed class OverlayRenderer : IDisposable
     private void DrawIcon(SKCanvas canvas, float x, float y,
         MenuItemConfig item, AeroTheme theme, bool hov, float alpha, float scale, float sizeMul = 1f)
     {
-        var bmp = IconRegistry.Get(item.Icon, theme.IconStrokeScale);
+        var bmp = IconRegistry.Get(item.Icon, theme.StrokeScale);
         if (bmp is null) return;
-        float size = (hov ? 27f : 22f) * scale * sizeMul;
+        float size = (hov ? 27f : 22f) * scale * sizeMul * theme.SizeScale;
         var dest = new SKRect(x-size/2, y-size/2, x+size/2, y+size/2);
         // Built-in icons are drawn white, so Modulate with the theme tint recolors them.
         // Full-color exe/image icons must NOT be tinted (a dark tint in a light theme would

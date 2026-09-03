@@ -1090,10 +1090,10 @@ public sealed partial class MenusPage : Page
 
             if (!empty && menu is not null)
             {
-                var bmp = IconRegistry.Get(menu.Items[i].Icon, theme.IconStrokeScale);
+                var bmp = IconRegistry.Get(menu.Items[i].Icon, theme.StrokeScale);
                 if (bmp is not null)
                 {
-                    float isz  = minDim * 0.12f * RingGeometry.IconSizeMul(sliceCount); // same shrink as the overlay
+                    float isz  = minDim * 0.12f * RingGeometry.IconSizeMul(sliceCount) * theme.SizeScale; // same shrink as the overlay
                     var   dest = new SKRect(ix - isz / 2, iy - isz / 2, ix + isz / 2, iy + isz / 2);
                     using var ip = new SKPaint
                     {
@@ -1487,7 +1487,7 @@ public sealed partial class MenusPage : Page
         if (string.IsNullOrEmpty(key)) return;
 
         var theme = App.Themes.ActiveTheme;
-        var bmp = IconRegistry.Get(key, theme.IconStrokeScale);
+        var bmp = IconRegistry.Get(key, theme.StrokeScale);
         if (bmp is null) return;
 
         var tint  = theme.ToSKColor(theme.IconTint);

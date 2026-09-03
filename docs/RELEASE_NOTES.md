@@ -1,6 +1,22 @@
 ## AeroDial v3.0.1
 
-Fixes for the four issues reported right after 3.0.0.
+AeroDial now ships as a Windows installer, plus icon controls in the theme editor and fixes for the four issues reported after 3.0.0.
+
+### AeroDial now installs
+
+- Download `AeroDial-3.0.1-Setup.exe` and run it. The install is **per user**, so there is no admin prompt, and AeroDial shows up in **Apps & features** with a proper uninstaller.
+- Optional **start automatically when I sign in** during setup, and an optional desktop shortcut.
+- Upgrading in place keeps your menus, profiles and themes. Uninstalling removes the app and its autostart entry, and asks before deleting your settings.
+- The installed `AeroDial.exe` is still a single self-contained file, so you can copy it elsewhere and run it portably if you prefer.
+
+### New
+
+- **Icon thickness and icon size** are now editable per theme (Themes > Edit theme > Icons). Thickness changes the weight of icon-font glyphs; size changes how large every icon is drawn, including app and image icons.
+- The theme preview now draws icons, so both settings are visible while you edit.
+
+### Changed
+
+- Icons on all built-in themes are **10 % thinner** (icon thickness 2.5 to 2.25). The "Auto (Windows accent)" theme now uses the same weight as the rest instead of hairline icons.
 
 ### Fixed
 

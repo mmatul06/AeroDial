@@ -6,6 +6,8 @@
 // identity, label font and the save buttons sit in a right column that stays put, so
 // every edit is visible while scrolling through the colors.
 
+using AeroDial.Core;
+using AeroDial.Overlay;
 using AeroDial.Themes;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
@@ -64,13 +66,19 @@ public sealed partial class ThemeEditorPanel : UserControl
         ("DimColor",                "Background dim",         "Screen"),
     ];
 
-    // Numeric fields: (property name, display label, spin step)
-    private static readonly (string Prop, string Label, double Step)[] FloatFields =
+    // Numeric fields: (property, label, spin step, min, max, section)
+    private static readonly (string Prop, string Label, double Step, double Min, double Max, string Group)[] FloatFields =
     [
-        ("SliceStrokeWidth",    "Border width",      0.5),
-        ("LabelFontSize",       "Label font size",   1),
-        ("VolumeRingThickness", "Volume ring width", 1),
+        ("IconStrokeScale",     "Icon thickness",    0.05, 0.2, 3,   "Icons"),
+        ("IconSizeScale",       "Icon size",         0.05, 0.5, 2,   "Icons"),
+        ("SliceStrokeWidth",    "Border width",      0.5,  0,   8,   "Other properties"),
+        ("LabelFontSize",       "Label font size",   1,    6,   32,  "Other properties"),
+        ("VolumeRingThickness", "Volume ring width", 1,    1,   20,  "Other properties"),
     ];
+
+    // Glyphs shown on the preview ring so icon thickness and size are visible while editing.
+    private static readonly string[] PreviewIcons =
+        [.. FluentGlyphs.Named.Take(12).Select(g => FluentGlyphs.Prefix + g.Name)];
 
     public ThemeEditorPanel() => Build();
 
@@ -175,30 +183,39 @@ public sealed partial class ThemeEditorPanel : UserControl
         stack.Children.Add(colorGrid);
 
         // ── Numeric properties: one per row, spin boxes aligned with the hex fields ──
-        stack.Children.Add(PageKit.SubHeader("Other properties"));
-        var floatGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6 };
-        floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelColumnWidth) });
-        floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        for (int i = 0; i < FloatFields.Length; i++)
+        foreach (var section in FloatFields.Select(f => f.Group).Distinct())
         {
-            var (prop, label, step) = FloatFields[i];
-            floatGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            stack.Children.Add(PageKit.SubHeader(section));
+            if (section == "Icons")
+                stack.Children.Add(Ui.Hint("Thickness applies to icon-font glyphs; size applies to every icon.", 11));
 
-            var lbl = new TextBlock { Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(lbl, 0); Grid.SetRow(lbl, i); floatGrid.Children.Add(lbl);
+            var floatGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6, Margin = new Thickness(0, 4, 0, 0) };
+            floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelColumnWidth) });
+            floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var nb = new NumberBox
+            int fRow = 0;
+            foreach (var (prop, label, step, min, max, _) in FloatFields.Where(f => f.Group == section))
             {
-                Width = NumberBoxWidth, FontSize = 12,
-                Minimum = 0, SmallChange = step, LargeChange = step * 4,
-                SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            nb.ValueChanged += (_, _) => _previewCanvas?.Invalidate();
-            _floatBoxes[prop] = nb;
-            Grid.SetColumn(nb, 1); Grid.SetRow(nb, i); floatGrid.Children.Add(nb);
+                floatGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                var lbl = new TextBlock { Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(lbl, 0); Grid.SetRow(lbl, fRow); floatGrid.Children.Add(lbl);
+
+                var nb = new NumberBox
+                {
+                    Width = NumberBoxWidth, FontSize = 12,
+                    Minimum = min, Maximum = max,
+                    SmallChange = step, LargeChange = step * 4,
+                    SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                nb.ValueChanged += (_, _) => _previewCanvas?.Invalidate();
+                _floatBoxes[prop] = nb;
+                Grid.SetColumn(nb, 1); Grid.SetRow(nb, fRow); floatGrid.Children.Add(nb);
+                fRow++;
+            }
+            stack.Children.Add(floatGrid);
         }
-        stack.Children.Add(floatGrid);
 
         scroll.Content = stack;
         Grid.SetColumn(scroll, 0);
@@ -299,6 +316,8 @@ public sealed partial class ThemeEditorPanel : UserControl
             box.Text = val;
             if (_colorSwatches.TryGetValue(prop, out var btn)) btn.Background = HexToBrush(val);
         }
+        SetFloat("IconStrokeScale",     t.IconStrokeScale);
+        SetFloat("IconSizeScale",       t.IconSizeScale);
         SetFloat("SliceStrokeWidth",    t.SliceStrokeWidth);
         SetFloat("LabelFontSize",       t.LabelFontSize);
         SetFloat("VolumeRingThickness", t.VolumeRingThickness);
@@ -344,6 +363,8 @@ public sealed partial class ThemeEditorPanel : UserControl
         foreach (var (prop, _, _) in ColorFields)
             if (_colorBoxes.TryGetValue(prop, out var box)) SetColorProp(t, prop, box.Text.Trim());
 
+        if (GetFloat("IconStrokeScale")     is { } iconStroke)      t.IconStrokeScale      = iconStroke;
+        if (GetFloat("IconSizeScale")       is { } iconSize)        t.IconSizeScale        = iconSize;
         if (GetFloat("SliceStrokeWidth")    is { } strokeW)         t.SliceStrokeWidth     = strokeW;
         if (GetFloat("LabelFontSize")       is { } fontSize)        t.LabelFontSize        = fontSize;
         if (GetFloat("VolumeRingThickness") is { } volW && volW > 0f) t.VolumeRingThickness = volW;
@@ -411,6 +432,25 @@ public sealed partial class ThemeEditorPanel : UserControl
             paint.Color       = isHover ? theme.ToSKColor(theme.SliceStrokeHover) : theme.ToSKColor(theme.SliceStroke);
             using (var path = SlicePath(cx, cy, outerR, innerR, start, sweep))
                 canvas.DrawPath(path, paint);
+        }
+
+        // Icons on the ring: the only way to see what icon thickness and size actually do.
+        float iconR  = (innerR + outerR) / 2f;
+        float iconSz = minDim * 0.12f * RingGeometry.IconSizeMul(slices) * theme.SizeScale;
+        using (var ip = new SKPaint { IsAntialias = true, FilterQuality = SKFilterQuality.High })
+        {
+            for (int i = 0; i < slices && PreviewIcons.Length > 0; i++)
+            {
+                var bmp = IconRegistry.Get(PreviewIcons[i % PreviewIcons.Length], theme.StrokeScale);
+                if (bmp is null) continue;
+                float rad = (-90f + i * fullArc) * MathF.PI / 180f;
+                float ix  = cx + MathF.Cos(rad) * iconR;
+                float iy  = cy + MathF.Sin(rad) * iconR;
+                ip.ColorFilter = SKColorFilter.CreateBlendMode(
+                    theme.ToSKColor(i == 0 ? theme.IconTintHover : theme.IconTint), SKBlendMode.Modulate);
+                canvas.DrawBitmap(bmp,
+                    new SKRect(ix - iconSz / 2, iy - iconSz / 2, ix + iconSz / 2, iy + iconSz / 2), ip);
+            }
         }
 
         paint.Style  = SKPaintStyle.Fill;
