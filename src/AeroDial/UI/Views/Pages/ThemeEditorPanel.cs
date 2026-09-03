@@ -66,14 +66,17 @@ public sealed partial class ThemeEditorPanel : UserControl
         ("DimColor",                "Background dim",         "Screen"),
     ];
 
+    private const string IconGroup  = "Icons";
+    private const string OtherGroup = "Other properties";
+
     // Numeric fields: (property, label, spin step, min, max, section)
     private static readonly (string Prop, string Label, double Step, double Min, double Max, string Group)[] FloatFields =
     [
-        ("IconStrokeScale",     "Icon thickness",    0.05, 0.2, 3,   "Icons"),
-        ("IconSizeScale",       "Icon size",         0.05, 0.5, 2,   "Icons"),
-        ("SliceStrokeWidth",    "Border width",      0.5,  0,   8,   "Other properties"),
-        ("LabelFontSize",       "Label font size",   1,    6,   32,  "Other properties"),
-        ("VolumeRingThickness", "Volume ring width", 1,    1,   20,  "Other properties"),
+        ("IconStrokeScale",     "Icon thickness",    0.05, 0.2, 3,   IconGroup),
+        ("IconSizeScale",       "Icon size",         0.05, 0.5, 2,   IconGroup),
+        ("SliceStrokeWidth",    "Border width",      0.5,  0,   8,   OtherGroup),
+        ("LabelFontSize",       "Label font size",   1,    6,   32,  OtherGroup),
+        ("VolumeRingThickness", "Volume ring width", 1,    1,   20,  OtherGroup),
     ];
 
     // Glyphs shown on the preview ring so icon thickness and size are visible while editing.
@@ -182,40 +185,27 @@ public sealed partial class ThemeEditorPanel : UserControl
         }
         stack.Children.Add(colorGrid);
 
-        // ── Numeric properties: one per row, spin boxes aligned with the hex fields ──
-        foreach (var section in FloatFields.Select(f => f.Group).Distinct())
+        // ── Numeric properties, one per row, aligned with the hex fields ──
+        // The Icons group is NOT here: it lives beside the preview (below), where it is
+        // visible without scrolling past eighteen colour rows.
+        stack.Children.Add(PageKit.SubHeader(OtherGroup));
+        var floatGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6, Margin = new Thickness(0, 4, 0, 0) };
+        floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelColumnWidth) });
+        floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        int fRow = 0;
+        foreach (var f in FloatFields.Where(f => f.Group == OtherGroup))
         {
-            stack.Children.Add(PageKit.SubHeader(section));
-            if (section == "Icons")
-                stack.Children.Add(Ui.Hint("Thickness applies to icon-font glyphs; size applies to every icon.", 11));
+            floatGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            var floatGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6, Margin = new Thickness(0, 4, 0, 0) };
-            floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelColumnWidth) });
-            floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var lbl = new TextBlock { Text = f.Label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(lbl, 0); Grid.SetRow(lbl, fRow); floatGrid.Children.Add(lbl);
 
-            int fRow = 0;
-            foreach (var (prop, label, step, min, max, _) in FloatFields.Where(f => f.Group == section))
-            {
-                floatGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-                var lbl = new TextBlock { Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-                Grid.SetColumn(lbl, 0); Grid.SetRow(lbl, fRow); floatGrid.Children.Add(lbl);
-
-                var nb = new NumberBox
-                {
-                    Width = NumberBoxWidth, FontSize = 12,
-                    Minimum = min, Maximum = max,
-                    SmallChange = step, LargeChange = step * 4,
-                    SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
-                    VerticalAlignment = VerticalAlignment.Center,
-                };
-                nb.ValueChanged += (_, _) => _previewCanvas?.Invalidate();
-                _floatBoxes[prop] = nb;
-                Grid.SetColumn(nb, 1); Grid.SetRow(nb, fRow); floatGrid.Children.Add(nb);
-                fRow++;
-            }
-            stack.Children.Add(floatGrid);
+            var nb = MakeNumberBox(f, NumberBoxWidth);
+            Grid.SetColumn(nb, 1); Grid.SetRow(nb, fRow); floatGrid.Children.Add(nb);
+            fRow++;
         }
+        stack.Children.Add(floatGrid);
 
         scroll.Content = stack;
         Grid.SetColumn(scroll, 0);
@@ -238,6 +228,19 @@ public sealed partial class ThemeEditorPanel : UserControl
         side.Children.Add(_previewCanvas);
 
         var sideFields = new StackPanel { Spacing = 6 };
+
+        // Icon thickness and size sit directly under the preview: they are the two settings
+        // you want to nudge while watching the ring, and the preview redraws on every change.
+        sideFields.Children.Add(PageKit.SubHeader(IconGroup));
+        foreach (var f in FloatFields.Where(f => f.Group == IconGroup))
+        {
+            var nb = MakeNumberBox(f, double.NaN);
+            nb.Header = f.Label;                 // label above the box: the column is only 232 px wide
+            nb.HorizontalAlignment = HorizontalAlignment.Stretch;
+            sideFields.Children.Add(nb);
+        }
+        sideFields.Children.Add(Ui.Hint("Thickness applies to icon-font glyphs. Size applies to every icon, including app icons.", 11));
+
         sideFields.Children.Add(PageKit.SubHeader("Identity"));
         _nameBox = new TextBox { PlaceholderText = "My theme", Header = "Name" };
         _descBox = new TextBox { PlaceholderText = "A short description", Header = "Description" };
@@ -325,6 +328,24 @@ public sealed partial class ThemeEditorPanel : UserControl
         if (_fontFamilyCombo.SelectedItem is null) _fontFamilyCombo.SelectedIndex = 0;
         _loading = false;
         _previewCanvas?.Invalidate();
+    }
+
+    /// <summary>Spin box for one numeric theme field, registered in _floatBoxes.
+    /// Pass double.NaN for width to let it stretch to its container.</summary>
+    private NumberBox MakeNumberBox(
+        (string Prop, string Label, double Step, double Min, double Max, string Group) f, double width)
+    {
+        var nb = new NumberBox
+        {
+            Width = width, FontSize = 12,
+            Minimum = f.Min, Maximum = f.Max,
+            SmallChange = f.Step, LargeChange = f.Step * 4,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        nb.ValueChanged += (_, _) => _previewCanvas?.Invalidate();
+        _floatBoxes[f.Prop] = nb;
+        return nb;
     }
 
     private void SetFloat(string prop, float value)

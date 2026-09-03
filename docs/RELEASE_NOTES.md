@@ -11,12 +11,12 @@ AeroDial now ships as a Windows installer, plus icon controls in the theme edito
 
 ### New
 
-- **Icon thickness and icon size** are now editable per theme (Themes > Edit theme > Icons). Thickness changes the weight of icon-font glyphs; size changes how large every icon is drawn, including app and image icons.
+- **Icon thickness and icon size** are now editable per theme, next to the live preview in Themes > Edit theme. Thickness changes the weight of icon-font glyphs; size changes how large every icon is drawn, including app and image icons.
 - The theme preview now draws icons, so both settings are visible while you edit.
 
 ### Changed
 
-- Icons on all built-in themes are **10 % thinner** (icon thickness 2.5 to 2.25). The "Auto (Windows accent)" theme now uses the same weight as the rest instead of hairline icons.
+- Icons on all built-in themes are **about 30 % thinner** (icon thickness 2.5 to 1.75). The "Auto (Windows accent)" theme now uses the same weight as the rest instead of hairline icons.
 
 ### Fixed
 
