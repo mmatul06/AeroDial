@@ -1,5 +1,5 @@
 // AeroDial — BuiltInThemes.cs
-// The eleven built-in preset themes, defined in code so they're always available
+// The built-in preset themes, defined in code so they're always available
 // even if the /themes folder is missing. These serve as the definitive reference
 // for what a well-formed theme looks like.
 // (Note: a Frost theme is also defined below but intentionally left out of All.)
@@ -27,6 +27,24 @@ internal static class BuiltInThemes
         Matrix,
         Arctic,
         Sakura,
+        Graphite,
+        Nord,
+        TokyoNight,
+        OnyxIce,
+        RosePine,
+        Aurora,
+        RoyalGold,
+        Crimson,
+        Porcelain,
+        Glass,
+        Synthwave,
+        Copper,
+        SolarizedDark,
+        Champagne,
+        Dusk,
+        HighContrast,
+        Ultraviolet,
+        Ink,
     ];
 
     // ── 1. Obsidian (default) ─────────────────────────────────────────────
@@ -455,4 +473,617 @@ internal static class BuiltInThemes
         AccentColor       = "#FFF080B0",
         RingBorderColor   = "#20180A14",
     };
+
+    // ── 12. Graphite ────────────────────────────────────────────
+    public static AeroTheme Graphite => new()
+    {
+        Name              = "Graphite",
+        Description       = "Monochrome, high contrast, gets out of the way.",
+        DimColor          = "#55000000",
+
+        SliceFill         = "#E61E1E1E",
+        SliceFillHover    = "#E63C3C3C",
+        SliceStroke       = "#26343434",
+        SliceStrokeHover  = "#CCFFFFFF",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#E6141414",
+        SliceGradientOuter      = "#E61E1E1E",
+        SliceGradientInnerHover = "#E62E2E2E",
+        SliceGradientOuterHover = "#E63C3C3C",
+
+        GlowColor         = "#66FFFFFF",
+
+        CenterFill        = "#E60E0E0E",
+        CenterStroke      = "#26343434",
+        IconTint          = "#CCFFFFFF",
+        IconTintHover     = "#FFFFFFFF",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCFFFFFF",
+        LabelColorHover   = "#FFFFFFFF",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E60E0E0E",
+        BreadcrumbText    = "#CCFFFFFF",
+        AccentColor       = "#FFEDEDED",
+        RingBorderColor   = "#26343434",
+    };
+
+    // ── 13. Nord ────────────────────────────────────────────────
+    public static AeroTheme Nord => new()
+    {
+        Name              = "Nord",
+        Description       = "Muted arctic blue-grey, easy on the eyes.",
+        DimColor          = "#55000000",
+
+        SliceFill         = "#E63B4252",
+        SliceFillHover    = "#E64C566A",
+        SliceStroke       = "#284C566A",
+        SliceStrokeHover  = "#CC88C0D0",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#E62E3440",
+        SliceGradientOuter      = "#E63B4252",
+        SliceGradientInnerHover = "#E63B4252",
+        SliceGradientOuterHover = "#E64C566A",
+
+        GlowColor         = "#8888C0D0",
+
+        CenterFill        = "#E62E3440",
+        CenterStroke      = "#284C566A",
+        IconTint          = "#CCECEFF4",
+        IconTintHover     = "#FFECEFF4",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCECEFF4",
+        LabelColorHover   = "#FFECEFF4",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E62E3440",
+        BreadcrumbText    = "#CCECEFF4",
+        AccentColor       = "#FF88C0D0",
+        RingBorderColor   = "#284C566A",
+    };
+
+    // ── 14. Tokyo Night ─────────────────────────────────────────
+    public static AeroTheme TokyoNight => new()
+    {
+        Name              = "Tokyo Night",
+        Description       = "Deep indigo with a cool blue glow.",
+        DimColor          = "#55000000",
+
+        SliceFill         = "#E624283B",
+        SliceFillHover    = "#E6363C5E",
+        SliceStroke       = "#2A414868",
+        SliceStrokeHover  = "#CC7AA2F7",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#E61A1B26",
+        SliceGradientOuter      = "#E624283B",
+        SliceGradientInnerHover = "#E62A2E45",
+        SliceGradientOuterHover = "#E6363C5E",
+
+        GlowColor         = "#997AA2F7",
+
+        CenterFill        = "#E61A1B26",
+        CenterStroke      = "#2A414868",
+        IconTint          = "#CCC0CAF5",
+        IconTintHover     = "#FFC0CAF5",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCC0CAF5",
+        LabelColorHover   = "#FFC0CAF5",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E61A1B26",
+        BreadcrumbText    = "#CCC0CAF5",
+        AccentColor       = "#FF7AA2F7",
+        RingBorderColor   = "#2A414868",
+    };
+
+    // ── 15. Onyx Ice ────────────────────────────────────────────
+    public static AeroTheme OnyxIce => new()
+    {
+        Name              = "Onyx Ice",
+        Description       = "Black glass with an icy edge.",
+        DimColor          = "#5C000000",
+
+        SliceFill         = "#E612161C",
+        SliceFillHover    = "#E6243240",
+        SliceStroke       = "#242E3846",
+        SliceStrokeHover  = "#CC9FE8FF",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#E60A0C10",
+        SliceGradientOuter      = "#E612161C",
+        SliceGradientInnerHover = "#E61A2430",
+        SliceGradientOuterHover = "#E6243240",
+
+        GlowColor         = "#997FDFFF",
+
+        CenterFill        = "#E6070910",
+        CenterStroke      = "#242E3846",
+        IconTint          = "#CCD8ECF7",
+        IconTintHover     = "#FFFFFFFF",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCD8ECF7",
+        LabelColorHover   = "#FFFFFFFF",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E6070910",
+        BreadcrumbText    = "#CCD8ECF7",
+        AccentColor       = "#FF7FDFFF",
+        RingBorderColor   = "#242E3846",
+    };
+
+    // ── 16. Rose Pine ───────────────────────────────────────────
+    public static AeroTheme RosePine => new()
+    {
+        Name              = "Rose Pine",
+        Description       = "Muted rose and gold on deep plum.",
+        DimColor          = "#55000000",
+
+        SliceFill         = "#E61F1D2E",
+        SliceFillHover    = "#E6302B47",
+        SliceStroke       = "#2A403D5C",
+        SliceStrokeHover  = "#CCEBBCBA",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#E6191724",
+        SliceGradientOuter      = "#E61F1D2E",
+        SliceGradientInnerHover = "#E626233A",
+        SliceGradientOuterHover = "#E6302B47",
+
+        GlowColor         = "#99EBBCBA",
+
+        CenterFill        = "#E6191724",
+        CenterStroke      = "#2A403D5C",
+        IconTint          = "#CCE0DEF4",
+        IconTintHover     = "#FFE0DEF4",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCE0DEF4",
+        LabelColorHover   = "#FFE0DEF4",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E6191724",
+        BreadcrumbText    = "#CCE0DEF4",
+        AccentColor       = "#FFEBBCBA",
+        RingBorderColor   = "#2A403D5C",
+    };
+
+    // ── 17. Aurora ──────────────────────────────────────────────
+    public static AeroTheme Aurora => new()
+    {
+        Name              = "Aurora",
+        Description       = "Deep teal to green with a luminous mint edge.",
+        DimColor          = "#55000000",
+
+        SliceFill         = "#E60A3A2E",
+        SliceFillHover    = "#E6116B4E",
+        SliceStroke       = "#2A0F5C46",
+        SliceStrokeHover  = "#CC4ADE9B",
+        SliceStrokeWidth  = 0.9f,
+
+        SliceGradientInner      = "#E6041F1A",
+        SliceGradientOuter      = "#E60A3A2E",
+        SliceGradientInnerHover = "#E60B4A38",
+        SliceGradientOuterHover = "#E6116B4E",
+
+        GlowColor         = "#AA4ADE9B",
+
+        CenterFill        = "#E604211B",
+        CenterStroke      = "#2A0F5C46",
+        IconTint          = "#CCD8FFEC",
+        IconTintHover     = "#FFEAFFF5",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCD8FFEC",
+        LabelColorHover   = "#FFEAFFF5",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E604211B",
+        BreadcrumbText    = "#CCD8FFEC",
+        AccentColor       = "#FF4ADE9B",
+        RingBorderColor   = "#2A0F5C46",
+    };
+
+    // ── 18. Royal Gold ──────────────────────────────────────────
+    public static AeroTheme RoyalGold => new()
+    {
+        Name              = "Royal Gold",
+        Description       = "Near-black and warm gold, deliberately luxurious.",
+        DimColor          = "#66000000",
+
+        SliceFill         = "#E62A2010",
+        SliceFillHover    = "#E6573F16",
+        SliceStroke       = "#2A5C4520",
+        SliceStrokeHover  = "#CCE8C063",
+        SliceStrokeWidth  = 0.9f,
+
+        SliceGradientInner      = "#E61A1408",
+        SliceGradientOuter      = "#E62A2010",
+        SliceGradientInnerHover = "#E63C2D12",
+        SliceGradientOuterHover = "#E6573F16",
+
+        GlowColor         = "#AAE8C063",
+
+        CenterFill        = "#E6140F06",
+        CenterStroke      = "#2A5C4520",
+        IconTint          = "#CCF7ECD2",
+        IconTintHover     = "#FFFFF8E7",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCF7ECD2",
+        LabelColorHover   = "#FFFFF8E7",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E6140F06",
+        BreadcrumbText    = "#CCF7ECD2",
+        AccentColor       = "#FFE8C063",
+        RingBorderColor   = "#2A5C4520",
+    };
+
+    // ── 19. Crimson ─────────────────────────────────────────────
+    public static AeroTheme Crimson => new()
+    {
+        Name              = "Crimson",
+        Description       = "Oxblood to scarlet, dramatic without being loud.",
+        DimColor          = "#66000000",
+
+        SliceFill         = "#E62C0F16",
+        SliceFillHover    = "#E6741B2E",
+        SliceStroke       = "#2A5A1A28",
+        SliceStrokeHover  = "#CCFF4D6A",
+        SliceStrokeWidth  = 0.9f,
+
+        SliceGradientInner      = "#E61A0A0E",
+        SliceGradientOuter      = "#E62C0F16",
+        SliceGradientInnerHover = "#E64A1220",
+        SliceGradientOuterHover = "#E6741B2E",
+
+        GlowColor         = "#AAFF3355",
+
+        CenterFill        = "#E6150809",
+        CenterStroke      = "#2A5A1A28",
+        IconTint          = "#CCFFDCE2",
+        IconTintHover     = "#FFFFF0F3",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCFFDCE2",
+        LabelColorHover   = "#FFFFF0F3",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E6150809",
+        BreadcrumbText    = "#CCFFDCE2",
+        AccentColor       = "#FFFF4D6A",
+        RingBorderColor   = "#2A5A1A28",
+    };
+
+    // ── 20. Porcelain ───────────────────────────────────────────
+    public static AeroTheme Porcelain => new()
+    {
+        Name              = "Porcelain",
+        Description       = "Warm off-white with a bronze accent, for bright desktops.",
+        DimColor          = "#22000000",
+
+        SliceFill         = "#F7F1E9D9",
+        SliceFillHover    = "#FAE9DCC0",
+        SliceStroke       = "#33BFB3A0",
+        SliceStrokeHover  = "#CC9A6E24",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#F7FFFCF4",
+        SliceGradientOuter      = "#F7F1E9D9",
+        SliceGradientInnerHover = "#FAFFFFFF",
+        SliceGradientOuterHover = "#FAE9DCC0",
+
+        GlowColor         = "#889A6E24",
+
+        CenterFill        = "#FAFFFDF6",
+        CenterStroke      = "#33BFB3A0",
+        IconTint          = "#F22E2418",
+        IconTintHover     = "#FF1A1208",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#F22E2418",
+        LabelColorHover   = "#FF1A1208",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#FAFFFDF6",
+        BreadcrumbText    = "#F22E2418",
+        AccentColor       = "#FFA9761F",
+        RingBorderColor   = "#33BFB3A0",
+    };
+
+    // ── 21. Glass ───────────────────────────────────────────────
+    public static AeroTheme Glass => new()
+    {
+        Name              = "Glass",
+        Description       = "Smoked glass, the desktop shows through.",
+        DimColor          = "#33000000",
+
+        SliceFill         = "#73182028",
+        SliceFillHover    = "#8C36434F",
+        SliceStroke       = "#24FFFFFF",
+        SliceStrokeHover  = "#CCBFD8FF",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#8C121820",
+        SliceGradientOuter      = "#73182028",
+        SliceGradientInnerHover = "#A62A3644",
+        SliceGradientOuterHover = "#8C36434F",
+
+        GlowColor         = "#66A8C8FF",
+
+        CenterFill        = "#A60E141C",
+        CenterStroke      = "#24FFFFFF",
+        IconTint          = "#DDFFFFFF",
+        IconTintHover     = "#FFFFFFFF",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#DDFFFFFF",
+        LabelColorHover   = "#FFFFFFFF",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#A60E141C",
+        BreadcrumbText    = "#DDFFFFFF",
+        AccentColor       = "#FFBFD8FF",
+        RingBorderColor   = "#24FFFFFF",
+    };
+
+    // ── 22. Synthwave ───────────────────────────────────────────
+    public static AeroTheme Synthwave => new()
+    {
+        Name              = "Synthwave",
+        Description       = "Magenta to violet with a cyan rim and heavy glow.",
+        DimColor          = "#66120024",
+
+        SliceFill         = "#E6461063",
+        SliceFillHover    = "#E6A3199E",
+        SliceStroke       = "#2A6B2A96",
+        SliceStrokeHover  = "#CC00E5FF",
+        SliceStrokeWidth  = 1f,
+
+        SliceGradientInner      = "#E62A0A3E",
+        SliceGradientOuter      = "#E6461063",
+        SliceGradientInnerHover = "#E66B1490",
+        SliceGradientOuterHover = "#E6A3199E",
+
+        GlowColor         = "#AAFF2FD0",
+
+        CenterFill        = "#E61A0426",
+        CenterStroke      = "#2A6B2A96",
+        IconTint          = "#DDF6D8FF",
+        IconTintHover     = "#FFFFFFFF",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#DDF6D8FF",
+        LabelColorHover   = "#FFFFFFFF",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E61A0426",
+        BreadcrumbText    = "#DDF6D8FF",
+        AccentColor       = "#FF00E5FF",
+        RingBorderColor   = "#2A6B2A96",
+    };
+
+    // ── 23. Copper ──────────────────────────────────────────────
+    public static AeroTheme Copper => new()
+    {
+        Name              = "Copper",
+        Description       = "Aged metal, warm without being orange.",
+        DimColor          = "#5A0B0603",
+
+        SliceFill         = "#E63A1F0D",
+        SliceFillHover    = "#E6884A1C",
+        SliceStroke       = "#2A6B3E1E",
+        SliceStrokeHover  = "#CCE09A5C",
+        SliceStrokeWidth  = 0.9f,
+
+        SliceGradientInner      = "#E6241309",
+        SliceGradientOuter      = "#E63A1F0D",
+        SliceGradientInnerHover = "#E65C2F12",
+        SliceGradientOuterHover = "#E6884A1C",
+
+        GlowColor         = "#99D98A4B",
+
+        CenterFill        = "#E61B0F07",
+        CenterStroke      = "#2A6B3E1E",
+        IconTint          = "#CCF3D9C2",
+        IconTintHover     = "#FFFFF3E6",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCF3D9C2",
+        LabelColorHover   = "#FFFFF3E6",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E61B0F07",
+        BreadcrumbText    = "#CCF3D9C2",
+        AccentColor       = "#FFE09A5C",
+        RingBorderColor   = "#2A6B3E1E",
+    };
+
+    // ── 24. Solarized Dark ──────────────────────────────────────
+    public static AeroTheme SolarizedDark => new()
+    {
+        Name              = "Solarized Dark",
+        Description       = "The classic: teal base, amber accent.",
+        DimColor          = "#55001A21",
+
+        SliceFill         = "#E6073642",
+        SliceFillHover    = "#E60F5F72",
+        SliceStroke       = "#28586E75",
+        SliceStrokeHover  = "#CC2AA198",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#E6002B36",
+        SliceGradientOuter      = "#E6073642",
+        SliceGradientInnerHover = "#E60A4A5A",
+        SliceGradientOuterHover = "#E60F5F72",
+
+        GlowColor         = "#992AA198",
+
+        CenterFill        = "#E6002B36",
+        CenterStroke      = "#28586E75",
+        IconTint          = "#CC93A1A1",
+        IconTintHover     = "#FFEEE8D5",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CC93A1A1",
+        LabelColorHover   = "#FFEEE8D5",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E6002B36",
+        BreadcrumbText    = "#CC93A1A1",
+        AccentColor       = "#FFB58900",
+        RingBorderColor   = "#28586E75",
+    };
+
+    // ── 25. Champagne ───────────────────────────────────────────
+    public static AeroTheme Champagne => new()
+    {
+        Name              = "Champagne",
+        Description       = "Pale gold on cream, the light side of Royal Gold.",
+        DimColor          = "#1E000000",
+
+        SliceFill         = "#F7F5EAD2",
+        SliceFillHover    = "#FAEEDCB4",
+        SliceStroke       = "#33C9B994",
+        SliceStrokeHover  = "#CC9A7524",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#F7FFFBF0",
+        SliceGradientOuter      = "#F7F5EAD2",
+        SliceGradientInnerHover = "#FAFFFDF6",
+        SliceGradientOuterHover = "#FAEEDCB4",
+
+        GlowColor         = "#88C9A227",
+
+        CenterFill        = "#FAFFFCF3",
+        CenterStroke      = "#33C9B994",
+        IconTint          = "#F2453212",
+        IconTintHover     = "#FF2A1D06",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#F2453212",
+        LabelColorHover   = "#FF2A1D06",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#FAFFFCF3",
+        BreadcrumbText    = "#F2453212",
+        AccentColor       = "#FFB08A2A",
+        RingBorderColor   = "#33C9B994",
+    };
+
+    // ── 26. Dusk ────────────────────────────────────────────────
+    public static AeroTheme Dusk => new()
+    {
+        Name              = "Dusk",
+        Description       = "Teal dusk with warm amber highlights.",
+        DimColor          = "#5A00070C",
+
+        SliceFill         = "#E60D2A34",
+        SliceFillHover    = "#E61C5460",
+        SliceStroke       = "#2A18525E",
+        SliceStrokeHover  = "#CCFFB454",
+        SliceStrokeWidth  = 0.85f,
+
+        SliceGradientInner      = "#E6071820",
+        SliceGradientOuter      = "#E60D2A34",
+        SliceGradientInnerHover = "#E6143C46",
+        SliceGradientOuterHover = "#E61C5460",
+
+        GlowColor         = "#99FFA53A",
+
+        CenterFill        = "#E6051219",
+        CenterStroke      = "#2A18525E",
+        IconTint          = "#CCD6E9EE",
+        IconTintHover     = "#FFFFE9C8",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCD6E9EE",
+        LabelColorHover   = "#FFFFE9C8",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E6051219",
+        BreadcrumbText    = "#CCD6E9EE",
+        AccentColor       = "#FFFFB454",
+        RingBorderColor   = "#2A18525E",
+    };
+
+    // ── 27. High Contrast ───────────────────────────────────────
+    public static AeroTheme HighContrast => new()
+    {
+        Name              = "High Contrast",
+        Description       = "Black, white and yellow. Readable on anything.",
+        DimColor          = "#99000000",
+
+        SliceFill         = "#FF000000",
+        SliceFillHover    = "#FFF5C400",
+        SliceStroke       = "#FFFFFFFF",
+        SliceStrokeHover  = "#FFFFFFFF",
+        SliceStrokeWidth  = 1.6f,
+
+        SliceGradientInner      = "#FF000000",
+        SliceGradientOuter      = "#FF000000",
+        SliceGradientInnerHover = "#FFFFE400",
+        SliceGradientOuterHover = "#FFF5C400",
+
+        GlowColor         = "#66FFE400",
+
+        CenterFill        = "#FF000000",
+        CenterStroke      = "#FFFFFFFF",
+        IconTint          = "#FFFFFFFF",
+        IconTintHover     = "#FF000000",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#FFFFFFFF",
+        LabelColorHover   = "#FF000000",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#FF000000",
+        BreadcrumbText    = "#FFFFFFFF",
+        AccentColor       = "#FFFFE400",
+        RingBorderColor   = "#FFFFFFFF",
+    };
+
+    // ── 28. Ultraviolet ─────────────────────────────────────────
+    public static AeroTheme Ultraviolet => new()
+    {
+        Name              = "Ultraviolet",
+        Description       = "Saturated violet to magenta, the boldest option.",
+        DimColor          = "#66100024",
+
+        SliceFill         = "#E6300055",
+        SliceFillHover    = "#E67B14C8",
+        SliceStroke       = "#2A55219A",
+        SliceStrokeHover  = "#CCC77DFF",
+        SliceStrokeWidth  = 0.9f,
+
+        SliceGradientInner      = "#E61A0033",
+        SliceGradientOuter      = "#E6300055",
+        SliceGradientInnerHover = "#E64F0A8C",
+        SliceGradientOuterHover = "#E67B14C8",
+
+        GlowColor         = "#AA9B30FF",
+
+        CenterFill        = "#E6120021",
+        CenterStroke      = "#2A55219A",
+        IconTint          = "#CCE9D6FF",
+        IconTintHover     = "#FFFFFFFF",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#CCE9D6FF",
+        LabelColorHover   = "#FFFFFFFF",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#E6120021",
+        BreadcrumbText    = "#CCE9D6FF",
+        AccentColor       = "#FFB14DFF",
+        RingBorderColor   = "#2A55219A",
+    };
+
+    // ── 29. Ink ─────────────────────────────────────────────────
+    public static AeroTheme Ink => new()
+    {
+        Name              = "Ink",
+        Description       = "Paper and black ink, one red accent.",
+        DimColor          = "#1A000000",
+
+        SliceFill         = "#F7F1EFE9",
+        SliceFillHover    = "#FAE7E4DC",
+        SliceStroke       = "#2E9A9084",
+        SliceStrokeHover  = "#CC1A1A1A",
+        SliceStrokeWidth  = 0.8f,
+
+        SliceGradientInner      = "#F7FBFAF7",
+        SliceGradientOuter      = "#F7F1EFE9",
+        SliceGradientInnerHover = "#FAFFFFFF",
+        SliceGradientOuterHover = "#FAE7E4DC",
+
+        GlowColor         = "#66C0392B",
+
+        CenterFill        = "#FAFDFCFA",
+        CenterStroke      = "#2E9A9084",
+        IconTint          = "#F2101010",
+        IconTintHover     = "#FF000000",
+        IconStrokeScale   = 0.25f,
+        LabelColor        = "#F2101010",
+        LabelColorHover   = "#FF000000",
+        LabelFontSize     = 11f,
+        BreadcrumbFill    = "#FAFDFCFA",
+        BreadcrumbText    = "#F2101010",
+        AccentColor       = "#FFC0392B",
+        RingBorderColor   = "#2E9A9084",
+    };
+
 }

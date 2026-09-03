@@ -47,7 +47,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>AeroDial</AssemblyName>
-    <Version>3.0.1</Version>
+    <Version>3.0.2</Version>
     <Company>3M Design Solutions</Company>
     <Authors>Muhtasim Mahbub</Authors>
     <Copyright>Copyright © 2026 Muhtasim Mahbub | 3M Design Solutions</Copyright>

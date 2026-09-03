@@ -19,9 +19,9 @@ AeroDial opens a customisable radial menu wherever your cursor is, triggered by 
 
 ## Download
 
-**[⬇ Download AeroDial v3.0.1](https://github.com/mmatul06/AeroDial/releases/latest)**
+**[⬇ Download AeroDial v3.0.2](https://github.com/mmatul06/AeroDial/releases/latest)**
 
-Download `AeroDial-3.0.1-Setup.exe` and run it. The installer is per user, so it needs no admin rights, and AeroDial appears in Apps & features like any other program.
+Download `AeroDial-3.0.2-Setup.exe` and run it. The installer is per user, so it needs no admin rights, and AeroDial appears in Apps & features like any other program.
 
 AeroDial starts silently in the system tray. Double Click on System Tray icon to open the Settings window.
 
@@ -86,7 +86,11 @@ Bind a specific menu to a specific app. When that app is in the foreground and y
 
 ### Visuals
 - Radial gradient fills, blur glow on hover, inner accent arc
-- 11 built-in themes: Obsidian, Ember, Midnight Teal, Chalk, Neon, Cyberpunk, Ocean, Sunset, Matrix, Arctic, Sakura, plus **Auto (Windows accent)** which follows your desktop accent color
+- 29 built-in themes, plus **Auto (Windows accent)** which follows your desktop accent color:
+  - *Dark:* Obsidian, Graphite, Onyx Ice, Nord, Tokyo Night, Midnight Teal, Rose Pine, Solarized Dark, Dusk, Ocean, Matrix, Aurora
+  - *Rich colour:* Royal Gold, Copper, Ember, Sunset, Crimson, Neon, Sakura, Cyberpunk, Synthwave, Ultraviolet
+  - *Light:* Chalk, Arctic, Porcelain, Champagne, Ink
+  - *Other:* Glass (smoked, the desktop shows through) and High Contrast (accessibility)
 - Full custom theme support: JSON files in `%AppData%\AeroDial\themes\`
 - Theme editor in Settings with a live preview: duplicate any built-in theme and edit its 18 color fields with color-picker flyouts
 - Smooth ease-out open/close animations; respects Windows animation preference
@@ -133,7 +137,7 @@ Bind a specific menu to a specific app. When that app is in the foreground and y
 
 ## Installation
 
-1. Download `AeroDial-3.0.1-Setup.exe` from [Releases](../../releases)
+1. Download `AeroDial-3.0.2-Setup.exe` from [Releases](../../releases)
 2. Run it and follow the wizard. Installing takes a few seconds and needs **no admin rights**: AeroDial installs for your user only, under `%LocalAppData%\Programs\AeroDial`
 3. Leave **Start AeroDial automatically when I sign in** ticked if you want it always available
 4. AeroDial starts silently in the system tray

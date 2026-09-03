@@ -1,3 +1,25 @@
+## AeroDial v3.0.2
+
+Eighteen new built-in themes, and the theme list now applies on click.
+
+### New themes
+
+Twenty-nine built-in themes, up from eleven. The new ones:
+
+- **Dark and neutral:** Graphite, Onyx Ice, Nord, Tokyo Night, Rose Pine
+- **Rich colour:** Royal Gold, Crimson, Aurora, Synthwave, Ultraviolet, Copper, Dusk, Solarized Dark
+- **Light:** Porcelain, Champagne, Ink
+- **Translucent:** Glass, a smoked panel the desktop shows through
+- **Accessibility:** High Contrast, black and yellow with thick slice separators
+
+Every one follows the existing house style: slice borders are a faint seam in a tone close to the slice fill, and the accent colour is reserved for the slice you are pointing at.
+
+### Changed
+
+- **Clicking a theme applies it.** The Themes list is now the control rather than a staging area, so the separate Apply button is gone. Duplicate and Delete still act on the theme you clicked.
+
+---
+
 ## AeroDial v3.0.1
 
 AeroDial now ships as a Windows installer, plus icon controls in the theme editor and fixes for the four issues reported after 3.0.0.
