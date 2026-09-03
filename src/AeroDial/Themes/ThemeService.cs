@@ -13,13 +13,8 @@ internal sealed class ThemeService
 {
     private readonly Dictionary<string, AeroTheme> _themes = new(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly JsonSerializerOptions s_json = new()
-    {
-        PropertyNamingPolicy  = JsonNamingPolicy.CamelCase,
-        ReadCommentHandling   = JsonCommentHandling.Skip,
-        AllowTrailingCommas   = true,
-        Converters            = { new JsonStringEnumConverter() },
-    };
+    // Shared with the writer (see ThemeJson): reading and writing must use the same options.
+    private static JsonSerializerOptions Json => ThemeJson.Options;
 
     private Windows.UI.ViewManagement.UISettings? _uiSettings;
 
@@ -81,7 +76,7 @@ internal sealed class ThemeService
     {
         Directory.CreateDirectory(AppConstants.UserThemesDir);
         var path = Path.Combine(AppConstants.UserThemesDir, $"{theme.Name}.json");
-        var json = JsonSerializer.Serialize(theme, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(theme, Json);
         File.WriteAllText(path, json);
         _themes[theme.Name] = theme;
         Logger.Info($"User theme saved: {theme.Name}");
@@ -137,7 +132,7 @@ internal sealed class ThemeService
             try
             {
                 var json  = File.ReadAllText(file);
-                var theme = JsonSerializer.Deserialize<AeroTheme>(json, s_json);
+                var theme = JsonSerializer.Deserialize<AeroTheme>(json, Json);
                 if (theme is null) continue;
                 theme.IsBuiltIn = isBuiltIn;
                 _themes[theme.Name] = theme;

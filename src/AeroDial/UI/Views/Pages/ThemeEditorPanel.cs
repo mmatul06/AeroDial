@@ -186,26 +186,31 @@ public sealed partial class ThemeEditorPanel : UserControl
         stack.Children.Add(colorGrid);
 
         // ── Numeric properties, one per row, aligned with the hex fields ──
-        // The Icons group is NOT here: it lives beside the preview (below), where it is
-        // visible without scrolling past eighteen colour rows.
-        stack.Children.Add(PageKit.SubHeader(OtherGroup));
-        var floatGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6, Margin = new Thickness(0, 4, 0, 0) };
-        floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelColumnWidth) });
-        floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        int fRow = 0;
-        foreach (var f in FloatFields.Where(f => f.Group == OtherGroup))
+        foreach (var section in new[] { OtherGroup, IconGroup })
         {
-            floatGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            stack.Children.Add(PageKit.SubHeader(section));
+            if (section == IconGroup)
+                stack.Children.Add(Ui.Hint(
+                    "Thickness applies to icon-font glyphs. Size applies to every icon, including app icons.", 11));
 
-            var lbl = new TextBlock { Text = f.Label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(lbl, 0); Grid.SetRow(lbl, fRow); floatGrid.Children.Add(lbl);
+            var floatGrid = new Grid { ColumnSpacing = 10, RowSpacing = 6, Margin = new Thickness(0, 4, 0, 0) };
+            floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelColumnWidth) });
+            floatGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var nb = MakeNumberBox(f, NumberBoxWidth);
-            Grid.SetColumn(nb, 1); Grid.SetRow(nb, fRow); floatGrid.Children.Add(nb);
-            fRow++;
+            int fRow = 0;
+            foreach (var f in FloatFields.Where(f => f.Group == section))
+            {
+                floatGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                var lbl = new TextBlock { Text = f.Label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(lbl, 0); Grid.SetRow(lbl, fRow); floatGrid.Children.Add(lbl);
+
+                var nb = MakeNumberBox(f, NumberBoxWidth);
+                Grid.SetColumn(nb, 1); Grid.SetRow(nb, fRow); floatGrid.Children.Add(nb);
+                fRow++;
+            }
+            stack.Children.Add(floatGrid);
         }
-        stack.Children.Add(floatGrid);
 
         scroll.Content = stack;
         Grid.SetColumn(scroll, 0);
@@ -228,19 +233,6 @@ public sealed partial class ThemeEditorPanel : UserControl
         side.Children.Add(_previewCanvas);
 
         var sideFields = new StackPanel { Spacing = 6 };
-
-        // Icon thickness and size sit directly under the preview: they are the two settings
-        // you want to nudge while watching the ring, and the preview redraws on every change.
-        sideFields.Children.Add(PageKit.SubHeader(IconGroup));
-        foreach (var f in FloatFields.Where(f => f.Group == IconGroup))
-        {
-            var nb = MakeNumberBox(f, double.NaN);
-            nb.Header = f.Label;                 // label above the box: the column is only 232 px wide
-            nb.HorizontalAlignment = HorizontalAlignment.Stretch;
-            sideFields.Children.Add(nb);
-        }
-        sideFields.Children.Add(Ui.Hint("Thickness applies to icon-font glyphs. Size applies to every icon, including app icons.", 11));
-
         sideFields.Children.Add(PageKit.SubHeader("Identity"));
         _nameBox = new TextBox { PlaceholderText = "My theme", Header = "Name" };
         _descBox = new TextBox { PlaceholderText = "A short description", Header = "Description" };

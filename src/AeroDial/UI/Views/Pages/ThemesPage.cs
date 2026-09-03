@@ -64,7 +64,12 @@ public sealed partial class ThemesPage : Page
 
         Content = outer;
 
+        // A config naming a theme that is no longer on disk must not leave the editor blank:
+        // fall back to whatever the overlay is actually drawing with.
         _selected = App.Config.Current.Appearance.ThemeName;
+        if (_selected is null || App.Themes.Get(_selected) is null)
+            _selected = App.Themes.ActiveTheme.Name;
+
         RebuildList();
         LoadSelected();
     }

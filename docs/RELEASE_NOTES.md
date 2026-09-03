@@ -11,15 +11,16 @@ AeroDial now ships as a Windows installer, plus icon controls in the theme edito
 
 ### New
 
-- **Icon thickness and icon size** are now editable per theme, next to the live preview in Themes > Edit theme. Thickness changes the weight of icon-font glyphs; size changes how large every icon is drawn, including app and image icons.
+- **Icon thickness and icon size** are now editable per theme (Themes > Edit theme, under Other properties). Thickness changes the weight of icon-font glyphs; size changes how large every icon is drawn, including app and image icons.
 - The theme preview now draws icons, so both settings are visible while you edit.
 
 ### Changed
 
-- Icons on all built-in themes are **about 30 % thinner** (icon thickness 2.5 to 1.75). The "Auto (Windows accent)" theme now uses the same weight as the rest instead of hairline icons.
+- Icons on all built-in themes are **much lighter** (icon thickness 2.5 to 0.25): glyphs are now drawn close to the icon font's own weight instead of being noticeably thickened. Raise **Icon thickness** in the theme editor if you preferred the heavier look. The "Auto (Windows accent)" theme uses the same weight as the rest.
 
 ### Fixed
 
+- **Themes you saved were lost.** The editor wrote theme files with different key casing than the loader expected, so a saved theme came back as an empty theme called "Custom" on the next start and vanished from the list, taking your colours with it. Saving and loading now use one shared format, and theme files written by earlier versions are read correctly again, so themes you saved before this release come back on upgrade.
 - **Tap-through froze the mouse for about a second.** The replayed click was sent from inside the low-level mouse hook, so Windows held all mouse input until its hook timeout expired. The replay now runs on a worker thread and the hook returns immediately. The trigger gate for "Disabled" app profiles no longer touches `System.Diagnostics.Process` on the hook thread either, and the hook callbacks no longer allocate per mouse move. With debug logging on, any hook callback slower than 20 ms is reported in the log.
 - **Icon-font glyphs were clipped** (the left edge of every icon was missing on the ring and in the menu editor). The glyph was being centered twice. The self-test now checks that rendered glyphs are whole and centered.
 - **"Slices per ring" slider** sat in the middle of the page and moved when the window was resized. It now lines up with the other sliders.
