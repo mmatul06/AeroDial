@@ -211,6 +211,10 @@ Output: `src/AeroDial/bin/x64/Debug/net9.0-windows10.0.26100.0/win-x64/`
 
 **Note:** `WindowsAppSDKSelfContained=true` and `SelfContained=true` are required in the csproj -- do not remove them or the app will crash with `ExecutionEngineException` on startup.
 
+**Note:** clone into a short path (`C:\src\AeroDial`, not a deeply nested folder). The Windows App SDK resource step writes into `obj\...\MsixContent\` and fails with `PRI180: 0x80070057 ... does not exist` when the resulting path passes the Windows 260-character limit.
+
+Your menus, app profiles, settings and any custom themes live in `%AppData%\AeroDial`, not in the repo. To carry them to another machine use **Settings > Advanced > Export settings**, then import the file there.
+
 ---
 
 ## Publishing a release build
