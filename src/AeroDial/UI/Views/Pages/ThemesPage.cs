@@ -1,5 +1,6 @@
 // AeroDial — ThemesPage.cs
-// Themes: list on the left (apply / duplicate / delete), live editor on the right.
+// Themes: list on the left, live editor on the right. Clicking a theme applies it
+// immediately (no Apply button); Duplicate and Delete act on the clicked theme.
 // Built-in themes are read-only in the editor until duplicated into a user theme.
 
 using AeroDial.Themes;
@@ -46,7 +47,7 @@ public sealed partial class ThemesPage : Page
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dir) { UseShellExecute = true });
         };
         left.Children.Add(folderBtn);
-        left.Children.Add(Ui.Hint("Theme files are JSON (#AARRGGBB colors). Built-in themes can be duplicated and then edited.", 11));
+        left.Children.Add(Ui.Hint("Click a theme to apply it. Theme files are JSON (#AARRGGBB colors); built-in themes can be duplicated and then edited.", 11));
 
         leftScroll.Content = left;
         Grid.SetColumn(leftScroll, 0);
@@ -134,29 +135,28 @@ public sealed partial class ThemesPage : Page
                 CornerRadius = new CornerRadius(8),
                 Tag = name,
             };
-            card.Click += (_, _) => { _selected = name; RebuildList(); LoadSelected(); };
+            // Clicking a theme applies it straight away; there is no separate Apply step.
+            card.Click += async (_, _) =>
+            {
+                try
+                {
+                    _selected = name;
+                    if (!string.Equals(App.Config.Current.Appearance.ThemeName, name, StringComparison.Ordinal))
+                        await App.Config.UpdateAsync(cfg => cfg.Appearance.ThemeName = name);
+                    RebuildList();
+                    LoadSelected();
+                }
+                catch (Exception ex)
+                {
+                    Core.Logger.Error($"Could not apply theme '{name}'", ex);
+                }
+            };
             _list.Children.Add(card);
         }
 
-        // Actions for the selected theme: Apply on its own full-width line, then
-        // Duplicate | Delete side by side. Three buttons in one row overflow this column.
+        // No Apply button: clicking a theme applies it (see the card handler above).
         var actions = new StackPanel { Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
         var selTheme = _selected is null ? null : App.Themes.Get(_selected);
-
-        var applyBtn = new Button
-        {
-            Content = "Apply",
-            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
-            IsEnabled = selTheme is not null && _selected != active,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        applyBtn.Click += async (_, _) =>
-        {
-            if (_selected is null) return;
-            await App.Config.UpdateAsync(cfg => cfg.Appearance.ThemeName = _selected);
-            RebuildList();
-        };
-        actions.Children.Add(applyBtn);
 
         var pair = new Grid { ColumnSpacing = 6 };
         pair.ColumnDefinitions.Add(new ColumnDefinition());
